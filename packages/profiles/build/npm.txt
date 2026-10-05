@@ -1,0 +1,9 @@
+bun
+pnpm
+typescript
+tsx
+prettier
+eslint
+pyright
+@biomejs/biome
+markdownlint-cli2

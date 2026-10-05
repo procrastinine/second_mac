@@ -1,0 +1,23 @@
+#!/usr/bin/expect -f
+set timeout 45
+set state [lindex $argv 0]
+set guest_user [lindex $argv 1]
+set ip [lindex $argv 2]
+set port [lindex $argv 3]
+if {$port eq ""} {set port 22}
+set f [open "$state/admin-password" r]
+set password [string trim [read $f]]
+close $f
+set f [open "$state/id_ed25519.pub" r]
+set pubkey [string trim [read $f]]
+close $f
+set command "umask 077; mkdir -p .ssh; touch .ssh/authorized_keys; grep -qxF '$pubkey' .ssh/authorized_keys || printf '%s\\n' '$pubkey' >> .ssh/authorized_keys; echo AGENT_KEY_READY"
+log_user 0
+spawn /usr/bin/ssh -F /dev/null -p $port -o IdentityAgent=none -o PubkeyAuthentication=no -o PreferredAuthentications=password -o NumberOfPasswordPrompts=1 -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new -o "UserKnownHostsFile=$state/bootstrap-known-hosts" "$guest_user@$ip" $command
+expect {
+    -re "(?i)password:" {send -- "$password\r"; exp_continue}
+    "AGENT_KEY_READY" {puts "Guest SSH key installed."; exp_continue}
+    "Permission denied" {puts stderr "Guest rejected the bootstrap password."; exit 1}
+    timeout {puts stderr "Bootstrap SSH timed out."; exit 1}
+    eof {catch wait result; exit [lindex $result 3]}
+}

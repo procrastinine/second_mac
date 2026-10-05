@@ -1,0 +1,9 @@
+#!/usr/bin/ruby
+require_relative '../network-supervisor'
+
+begin
+  AgentVM::NetworkSupervisor.new(ARGV).run
+rescue StandardError => error
+  warn "Network supervisor: #{error.message}"
+  exit 1
+end
