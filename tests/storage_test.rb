@@ -126,7 +126,17 @@ class StorageTest < Minitest::Test
     destination = FixtureVM.new(@vm.config.merge('name'=>'new-box'))
     target = AgentVM::Images.new(destination)
     calls = []
-    AgentVM.stub(:run, lambda { |*args, **_options| calls << args; '27.0.1' }) do
+    run = AgentVM.method(:run)
+    # Only replace Tart. Cache creation and reuse must see the same host OS;
+    # returning a fixed sw_vers here made this test depend on the runner's OS.
+    AgentVM.stub(:run, lambda { |*args, **options|
+      if args.first == '/fake/tart'
+        calls << args
+        ''
+      else
+        run.call(*args, **options)
+      end
+    }) do
       capture_io { assert target.reuse }
     end
     assert_equal 'disk.img-original', File.read(File.join(destination.tart_directory, 'disk.img'))
@@ -144,6 +154,21 @@ class StorageTest < Minitest::Test
     assert_equal File.read(@vm.file('admin-password')), File.read(destination.file('admin-password'))
     assert File.read(destination.file('known-hosts')).start_with?('copy-box ')
     assert_equal File.join(@directory, 'separate-share'), destination.config['share']
+  end
+
+  def test_pristine_cache_keeps_macos_26_and_27_host_compatibility_separate
+    @vm.config['phase'] = 'creating'
+    images = AgentVM::Images.new(@vm)
+    [26, 27].each do |major|
+      images.stub(:host_major, major) { capture_io { images.cache } }
+    end
+    manifests = [26, 27].map do |major|
+      path = images.stub(:host_major, major) { images.reusable }
+      refute_nil path
+      assert_equal major, JSON.parse(File.read(path)).fetch('host_major')
+      path
+    end
+    refute_equal manifests[0], manifests[1]
   end
 
   def test_latest_selection_is_recorded_for_resume_and_only_matching_bases_are_reused

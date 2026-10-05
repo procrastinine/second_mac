@@ -16,6 +16,9 @@ class HostPathTest < Minitest::Test
     @installer = AgentVM::Installer.new(@vm.config)
     @brew = File.join(@tmp, 'homebrew/bin/brew')
     AgentVM.write(@vm.file('runtime/lib/cli.rb'), 'puts ENV.fetch("PATH").split(File::PATH_SEPARATOR).count { |entry| entry == File.join(Dir.home, ".local/bin") }' + "\n")
+    %w[completion.rb command-catalog.rb profile-plan.rb].each do |name|
+      FileUtils.cp(File.expand_path('../lib/' + name, __dir__), @vm.file('runtime/lib/' + name))
+    end
   end
 
   def teardown
@@ -35,7 +38,7 @@ class HostPathTest < Minitest::Test
     assert_equal [File.join(Dir.home, '.local/bin/vm'), '1'], output.lines.map(&:strip)
   end
 
-  def test_already_on_path_leaves_startup_files_untouched
+  def test_already_on_path_adds_only_completion_and_preserves_startup_settings
     rc = File.join(Dir.home, '.zshrc')
     AgentVM.write(rc, "# existing settings\n", 0644)
     FileUtils.mkdir_p(File.join(Dir.home, '.local/bin'))
@@ -43,8 +46,10 @@ class HostPathTest < Minitest::Test
     File.symlink(File.join(Dir.home, '.local/bin'), alias_path)
     ENV['PATH'] = alias_path + '/:' + ENV['PATH']
     install
-    assert_equal "# existing settings\n", File.read(rc)
-    refute File.exist?(@vm.file('shell-config-backups'))
+    assert File.read(rc).start_with?("# existing settings\n")
+    refute_includes File.read(rc), AgentVM::HostPath::MARKER
+    assert_includes File.read(rc), AgentVM::HostCompletion::MARKER
+    assert_equal "# existing settings\n", File.read(Dir.glob(@vm.file('shell-config-backups/*')).fetch(0))
   end
 
   def test_zsh_new_terminal_finds_vm_and_preserves_symlinked_configuration
@@ -113,5 +118,25 @@ class HostPathTest < Minitest::Test
     assert_empty output
     assert File.executable?(File.join(Dir.home, '.local/bin/vm'))
     refute File.exist?(File.join(Dir.home, '.zshrc'))
+  end
+
+  def test_installed_completion_uses_custom_state_in_new_bash_and_zsh_shells
+    @vm.save
+    AgentVM.write(File.join(AgentVM.state_root, 'default'), @vm.name + "\n")
+    AgentVM.write(@vm.file('snapshots/local-checkpoint/manifest.json'), '{}')
+    %w[bash zsh].each do |shell|
+      ENV['SHELL'] = '/bin/' + shell
+      install
+      body = if shell == 'bash'
+               'COMP_WORDS=(vm snapshot restore ""); COMP_CWORD=3; _vm_complete; printf "%s\\n" "${COMPREPLY[@]}"'
+             else
+               '[[ ${_comps[vm]} == _vm_complete && ${_comps[agent-vm]} == _vm_complete ]] || exit 1; words=(vm snapshot restore ""); CURRENT=4; compadd() { local name=${argv[-1]}; print -rl -- "${(@P)name}"; }; _vm_complete'
+             end
+      # The generated script must retain the installer's custom state root,
+      # even when a later terminal does not export AGENT_VM_HOME.
+      output, error, status = Open3.capture3({'AGENT_VM_HOME'=>nil}, '/bin/' + shell, '-ic', body)
+      assert status.success?, error
+      assert_equal "local-checkpoint\n", output
+    end
   end
 end

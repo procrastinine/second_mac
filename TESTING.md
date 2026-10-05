@@ -21,6 +21,14 @@ those dependencies; the first uv run may download Python and `xattr`.
 macFUSE does not need to be installed or mounted. GitHub Actions runs the same
 suite on a macOS runner.
 
+CLI coverage includes help for every public command and nested action before
+VM code is loaded, preservation of forwarded guest `--help` arguments, and
+real system Bash/zsh completion with isolated local state. Installer tests
+check shell registration, custom state roots, repeated setup and symlinked
+startup files. These use the macOS system Ruby and Bash, including Bash 3.2.
+Image-cache fixtures separately exercise macOS 26 and 27 host metadata; a
+mocked Tart command must not replace the host OS version used for cache matching.
+
 With a logged-in graphical macOS session, an additional window lifecycle check
 is available:
 

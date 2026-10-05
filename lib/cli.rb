@@ -1,4 +1,27 @@
 #!/usr/bin/ruby
+require_relative 'command-catalog'
+# Resolve help before loading any VM or operational handler. In particular,
+# ssh/agent help must not start a guest, and help works before installation.
+begin
+  help = AgentVM::CommandCatalog.help_request(ARGV)
+  if help
+    puts AgentVM::CommandCatalog.help(help)
+    exit
+  end
+  _, discovery_args = AgentVM::CommandCatalog.invocation(ARGV)
+  if discovery_args.first == 'completion'
+    require_relative 'completion'
+    raise AgentVM::CommandCatalog::Error, 'Usage: vm completion bash|zsh' unless discovery_args.length == 2
+    puts AgentVM::Completion.shell(discovery_args.last)
+    exit
+  end
+  if discovery_args.first && !AgentVM::CommandCatalog::COMMANDS.key?(discovery_args.first) && !%w[menu menu-action].include?(discovery_args.first)
+    raise AgentVM::CommandCatalog::Error, "Unknown command: #{discovery_args.first}. Run vm help."
+  end
+rescue AgentVM::CommandCatalog::Error => error
+  warn "Error: #{error.message}"
+  exit 1
+end
 require_relative 'core'
 require_relative 'files'
 require_relative 'install'
@@ -37,66 +60,6 @@ begin
     raise AgentVM::Error, '--name requires a value' unless name
   end
   command = ARGV.shift || 'status'
-  if %w[help --help -h].include?(command)
-    puts <<~'HELP'
-      Usage: vm [--name NAME] COMMAND [OPTIONS]
-
-      Daily use
-        status / access [--json]       Power state / actual host access
-        start / stop                  Start / clean shutdown
-        ssh [COMMAND...] / tmux [NAME] Shell / persistent terminal session
-        gui [--hide | --headless]      Show/hide the desktop without restarting
-        sudo COMMAND...               Run as guest root; stored password supplied
-        cp SRC... DEST                Copy files; prefix guest paths with :
-        mount / unmount               Guest root in host Finder
-        password [--guest | --show]    Copy password to host clipboard by default
-
-      Power and runtime
-        suspend / resume              Save/recover guest memory and processes
-        reboot                        Reboot guest macOS; keep Tart if supported
-        restart                       Restart both Tart and guest macOS
-        runtime [standard|custom|auto] Inspect / select the next cold-start runtime
-        resources [--cpus N --memory GiB --disk GB]
-        force-stop                    Abrupt power-off, for a stuck guest only
-
-      Access and controls
-        shares [configure OPTIONS]    Native RW, native RO and optional linked folder
-        network [auto|native|vpn|off|on|refresh]
-        ports [host|guest PORT [PORT] | remove host|guest PORT]
-        ui enable|disable|inspect|approve|show|hide
-        permissions status|grant APP PERMISSION...|revoke APP PERMISSION...|auto on|off
-        guest-control on|off [--once] | status | autostart on|off
-        auth set                      Enter a host OpenRouter key privately; enable relay
-        auth host [--path|--from-guest] / auth guest
-        auth relay on|off [--once] | status | autostart on|off
-        audio on|off|mute|unmute       Output only; mute/unmute are live
-        microphone on|off             Separate host microphone opt-in
-        camera setup|on|off|status     Separate OBS camera opt-in
-        sip status|on|off              Guest SIP; changes use Recovery and reboot
-
-      Installation and maintenance
-        update [--check]               Update Second Mac and VM tools; keep guest macOS
-        update --macos [--check]       Update guest macOS separately; may reboot
-        apply / doctor / logs         Reapply settings / check / view startup errors
-        profiles [add|install PROFILE...] / agents [add pi codex claude]
-        pi / codex / claude            Open an installed agent
-        menubar install               Install SwiftBar integration
-        images / cache [clean]        Local OS images / obsolete compiler caches
-        snapshot list|create|restore|verify|delete [NAME]
-        backup [--verify] DIRECTORY / restore DIRECTORY
-        check-sleep                   Test the same SSH session across lid sleep
-
-      Retained copies
-        throwaway [--name NAME] [SCRIPT [ARG...]]
-        throwaway list | ssh ID | gui ID | start ID | stop ID | delete ID
-
-      SSH and sudo accept separate arguments or one quoted shell line.
-      Example: vm ssh 'cd src && make'; vm cp ./project :~/
-      Device changes queue for a cold start; --restart applies them explicitly.
-      Details: GUIDE.md and CAPABILITIES.md in the source checkout.
-    HELP
-    exit
-  end
   if command == 'images'
     raise AgentVM::Error, 'Usage: vm images' unless ARGV.empty?
     AgentVM::Images.list
@@ -214,6 +177,7 @@ begin
   when 'shares' then AgentVM::ShareSettings.new(vm).command(ARGV)
   when 'agents' then AgentVM::Agents.new(vm).command(ARGV)
   when 'ssh', 'tmux', 'pi', 'codex', 'claude'
+    ARGV.shift if command != 'tmux' && ARGV.first == '--'
     selected = command
     if %w[pi codex claude].include?(selected) && !vm.config['agents'].include?(selected)
       raise AgentVM::Error, "Install first: agent-vm agents add #{selected}"
@@ -231,6 +195,7 @@ begin
     args << line if line && !target.empty?
     exec(*args)
   when 'sudo'
+    ARGV.shift if ARGV.first == '--'
     line = AgentVM::GuestCommands.sudo_line(ARGV)
     vm.start unless vm.running?
     # The password goes first on sudo's stdin and is never on a command line;
@@ -273,7 +238,7 @@ begin
     vm.start unless vm.running?
     puts 'After the first PID, close/reopen the lid and press Enter. The PID must stay the same.'
     exec(*vm.ssh_args, '-tt', vm.name, 'sh -c \'printf "Guest PID: %s\\n" "$$"; read answer; printf "Same guest PID: %s\\n" "$$"\'')
-  else raise AgentVM::Error, "Unknown command: #{command}. Run agent-vm help."
+  else raise AgentVM::Error, "Unknown command: #{command}. Run vm help."
   end
 rescue AgentVM::Error => e
   warn "Error: #{e.message}"

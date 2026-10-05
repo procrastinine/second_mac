@@ -175,6 +175,14 @@ original files are backed up in private VM state. Repeating the installer does
 not duplicate its PATH block. It honors `ZDOTDIR` and `XDG_CONFIG_HOME` when set.
 Other shells receive manual setup instructions.
 
+Installation and code-only updates also enable `vm` / `agent-vm` Tab completion
+in the host's Bash or zsh startup files. Existing completion frameworks remain
+in place; setup is idempotent and preserves symlinked startup files. Completion
+reads local metadata only. Open a new terminal, or run
+`eval "$(vm completion zsh)"` (Bash: `eval "$(vm completion bash)"`) in the
+current one. `vm help completion` explains manual setup. Other shells retain
+their existing configuration. `--no-integrations` skips shell integration.
+
 Homebrew analytics are disabled during installation and persistently with
 [`brew analytics off`](https://docs.brew.sh/Analytics) on the host and guest.
 The bootstrap installs missing Apple Command Line Tools using `softwareupdate`

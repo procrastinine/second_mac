@@ -12,6 +12,25 @@ or [SwiftBar](#swiftbar).
 
 ## Everyday commands
 
+Run `vm help` for the command overview. `vm help snapshot` and
+`vm snapshot --help` explain a command; `vm help snapshot restore` and
+`vm snapshot restore --help` explain a nested action. Help works before a VM is
+installed and never starts or changes one.
+
+The installer enables Tab completion for the host's Bash or zsh. Tab suggests
+commands, options, fixed choices, local snapshot names and retained-copy IDs.
+It reads only local metadata; it never starts a VM, opens SSH or queries guest
+files or tmux. To enable it in an already-open terminal:
+
+```sh
+eval "$(vm completion zsh)"   # zsh
+# or: eval "$(vm completion bash)"
+```
+
+For commands forwarded into the guest, flags after the guest program stay with
+that program: `vm ssh python --help` shows Python's help. `vm ssh --help` shows
+Second Mac's SSH help. Use `vm codex -- --help` for an agent's own help.
+
 See the [capability and restart table](CAPABILITIES.md) for regular versus
 custom Tart, live operations, and changes that take effect at the next start.
 

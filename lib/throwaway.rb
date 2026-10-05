@@ -1,4 +1,5 @@
 require_relative 'core'
+require_relative 'command-catalog'
 require_relative 'images'
 require_relative 'install'
 require 'optparse'
@@ -7,7 +8,7 @@ require 'time'
 module AgentVM
   # Retained COW copies. Never attach the source VM disk, share, or forwards.
   class Throwaway
-    ACTIONS = %w[ssh sudo cp tmux gui mount unmount start stop restart reboot suspend resume status resources password ports network sip permissions ui guest-control microphone audio camera auth].freeze
+    ACTIONS = CommandCatalog::THROWAWAY_ACTIONS
 
     def initialize(source_name = nil)
       @source_name = source_name

@@ -24,6 +24,7 @@ Advanced build selection stays in `vm runtime`; SwiftBar shows everyday actions.
 | Addition | What it does |
 | --- | --- |
 | One-command shell | `vm ssh` starts the guest if needed and connects without looking up its IP. `vm ssh COMMAND`, `vm sudo COMMAND` and `vm cp` cover command execution, administration and transfers. |
+| Command discovery | `vm help COMMAND` and nested `--help` explain arguments without loading or starting a VM. Bash/zsh Tab completion suggests commands, flags, choices, snapshots and copy IDs from local state only. |
 | Private SSH transport | SSH uses Tart's VirtIO channel and the guest's loopback SSH server. Wi-Fi changes, guest DHCP and turning external networking off do not remove this path. Dedicated credentials replace password entry; the host SSH agent and keys are not forwarded. |
 | Sleep-friendly SSH settings | Disabled heartbeat/idle expiry lets host sleep pause the existing transport. It targets the same connection surviving wake, without keeping the host awake. Actual lid-close survival needs the per-machine `vm check-sleep` test; it is not guaranteed. |
 | Agent-friendly tmux | `vm tmux` creates or attaches sessions. Mouse scrollback, Option-click support, large history, extended keys, activity indicators and explicit clipboard copying are configured. Tmux remains optional for ordinary shells. |

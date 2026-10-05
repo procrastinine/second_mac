@@ -259,6 +259,8 @@ module AgentVM
         AgentVM.write(entry, script, 0755)
       end
       HostPath.install(vm)
+      require_relative 'host-completion'
+      HostCompletion.install(vm)
     end
 
     def credentials(vm)
