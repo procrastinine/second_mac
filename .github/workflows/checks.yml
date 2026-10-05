@@ -19,4 +19,9 @@ jobs:
           persist-credentials: false
       - run: brew install uv node go
       - run: ./tests/run.sh
-      - run: /usr/bin/ruby tests/tart-ui-check.rb latest
+      - name: Check current Tart release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tart_release=$(gh api repos/openai/tart/releases/latest --jq '.tag_name')
+          /usr/bin/ruby tests/tart-ui-check.rb "$tart_release"
