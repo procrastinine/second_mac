@@ -133,9 +133,23 @@ class CoreTest < Minitest::Test
     blocks = AgentVM.blocked_networks(interfaces)
     assert_includes blocks, '203.0.113.0/24'
     assert_includes blocks, '203.0.113.42/32'
-    assert_includes blocks, '192.168.50.0/24'
+    assert_includes blocks, '192.168.0.0/16'
     refute_includes blocks, '0.0.0.0/0'
     assert (AgentVM::PRIVATE_NETS - blocks).empty?
+  end
+  def test_private_vmnet_subnets_do_not_change_effective_restrictions
+    lan = "en0: flags=8863\n\tinet 203.0.113.42 netmask 0xffffff00\n"
+    expected = AgentVM.blocked_networks(lan)
+    %w[10.47.29.97 172.24.158.169 192.168.46.201].each do |gateway|
+      interfaces = lan + "bridge100: flags=8a63\n\tinet #{gateway} netmask 0xfffffffc\n\tmember: vmenet0 flags=3\n"
+      assert_equal expected, AgentVM.blocked_networks(interfaces)
+    end
+    assert_equal AgentVM::PRIVATE_NETS, AgentVM.blocked_networks("inet 127.0.0.1 netmask 0xff000000\n")
+  end
+  def test_connected_subnet_extending_outside_private_range_remains_blocked
+    blocks = AgentVM.blocked_networks("inet 192.168.50.2 netmask 0xff000000\n")
+    assert_includes blocks, '192.0.0.0/8'
+    assert_empty AgentVM::PRIVATE_NETS - blocks
   end
   def test_status_reads_process_lock_without_opening_disk_images
     previous = ENV['TART_HOME']

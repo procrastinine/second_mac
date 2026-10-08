@@ -130,9 +130,10 @@ module AgentVM
           result = request('op'=>'network-set', 'backend'=>wire_backend(backend), 'binary'=>binary, 'blocks'=>blocks)
           raise Error, 'VM changed during its network switch.' unless result['pid'] == @vm.running_pid
           AgentVM.json_write(@vm.file('network-state.json'), {'backend'=>backend, 'binary'=>binary, 'owner'=>result['pid'], 'blocks'=>blocks})
-          # A filter refresh does not change guest addressing or DNS. Avoid
-          # needless DHCP/guest work on a same-backend LAN change.
-          configure_dns(renew:true) if force || backend_changed || saved['dns_pending'] || status['healthy'] == false
+          # Updating restrictions also replaces the helper. Native Softnet can
+          # allocate a new subnet and must learn the guest's lease again, even
+          # when the backend is unchanged. Renew once after every replacement.
+          configure_dns(renew:true)
         elsif saved['dns_pending']
           configure_dns(renew:true)
           AgentVM.json_write(@vm.file('network-state.json'), state.reject { |key, _| key == 'dns_pending' })

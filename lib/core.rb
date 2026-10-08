@@ -300,7 +300,17 @@ module AgentVM
       # RFC1918 ranges plus host /32s alone do not block those neighboring hosts.
       blocks << address.mask(prefix).to_s + '/' + prefix.to_s
     end
-    blocks.uniq
+    # vmnet can allocate a different private /30 whenever Softnet starts.
+    # Those addresses are already blocked by PRIVATE_NETS. Retaining redundant
+    # rules makes the watcher mistake its own replacement router for a LAN
+    # change and replace it again indefinitely. Keep public LAN rules, including
+    # subnets that extend beyond a fixed block, without ignoring any interface.
+    fixed = PRIVATE_NETS.reject { |block| block == '@host' }.map { |block| IPAddr.new(block) }
+    blocks.uniq.reject do |block|
+      next false if PRIVATE_NETS.include?(block)
+      range = IPAddr.new(block).to_range
+      fixed.any? { |network| network.include?(range.first) && network.include?(range.last) }
+    end
   end
 
   def self.xml(value)

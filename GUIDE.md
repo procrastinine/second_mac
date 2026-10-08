@@ -589,9 +589,11 @@ each throwaway. Changing a stopped VM's selection does not start it. Copies
 retain their own settings and host runtime; updating the main VM does not
 update existing throwaways.
 
-Backend changes replace the network helper and renew guest DHCP/DNS.
-A connected-subnet-only update refreshes the helper's restrictions without
-renewing guest addressing or DNS.
+Backend changes and changes to connected-subnet restrictions replace the
+network helper and renew guest DHCP/DNS. Native Softnet can assign a new subnet
+on each replacement. Private addresses already covered by the isolation rules
+do not trigger replacements, so the virtual router's own address changes cannot
+cause a refresh loop.
 macOS stays running; VirtIO SSH sessions, shared folders, Finder transport, and
 explicit port forwards retain their connections. Existing **internet** TCP
 connections can break when the router or VPN changes. An older running Tart

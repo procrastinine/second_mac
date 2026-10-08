@@ -93,6 +93,10 @@ Coverage includes:
 - Direct network descriptor handoff, live helper replacement, failure recovery,
   owner-only control and helper cleanup without a Tart patch; desktop show/hide
   without restarting a VM that has its optional UI controller attached.
+- Stable isolation rules across private vmnet subnet changes, retained public
+  LAN restrictions, DHCP renewal after every helper replacement, and retrying
+  failed renewal without replacing the helper again. Guest renewal uses the
+  managed network service so saved DNS settings remain effective.
 - Throwaway menu states and confirmation boundaries, permission SQL/code
   identity, refusal of unsupported SIP/TCC states, unsafe UI sockets,
   conservative consent matching, and upstream UI build/version/cache checks.
