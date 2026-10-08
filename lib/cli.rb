@@ -36,6 +36,7 @@ require_relative 'backups'
 require_relative 'images'
 require_relative 'throwaway'
 require_relative 'shares-cli'
+require_relative 'projects'
 require_relative 'guest-commands'
 require_relative 'sip'
 require_relative 'ui'
@@ -174,6 +175,7 @@ begin
     puts "Throwaway ID: #{vm.config['throwaway']['id']} (retained until explicitly deleted)" if vm.config['throwaway']
     puts "State: #{vm.state}"
     puts 'Network: ' + AgentVM::Network.new(vm).summary
+  when 'projects' then AgentVM::Projects.new(vm).command(ARGV)
   when 'shares' then AgentVM::ShareSettings.new(vm).command(ARGV)
   when 'agents' then AgentVM::Agents.new(vm).command(ARGV)
   when 'ssh', 'tmux', 'pi', 'codex', 'claude'

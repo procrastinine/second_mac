@@ -242,3 +242,29 @@ continue to use their existing private transport.
 
 The supported installation uses no FSKit extension, signing account, FUSE-T, or
 WebDAV service.
+
+## Local project tools
+
+Run `vm projects setup ~/vmshare/example` on the host to configure a shared pnpm, npm, or uv workspace. The command installs small command adapters and private settings in each account, without adding files to the project. It starts the guest if necessary, supports different absolute project paths, and can be repeated for other projects or to refresh the installed adapters. Open a new shell afterward. `vm projects list` shows registrations; `vm projects remove PATH` removes a registration while retaining installed dependencies and environments.
+
+For pnpm, this supplies a stable pathname for each Mac's independent package cache, disables the global virtual store for that project, and keeps `verifyDepsBeforeRun=error`. Existing dependencies need one `pnpm install --force` to adopt that cache; subsequent installs, updates, and runs use ordinary pnpm commands. Before scripts run, a local presence/version check uses pnpm's own dependency listing and its explicitly skipped platform packages to catch damaged transitive packages that its fast pre-run check can miss. The installed pnpm remains responsible for lockfile, release-age, trust, build-script, and dependency verification. No tool or dependency version is pinned or overridden. Source and installed packages may be shared when the OS, CPU architecture, and required native runtime ABI are compatible; upgrade incompatible runtimes together and reinstall affected native dependencies.
+
+For uv projects, use normal `uv sync` and `uv run` commands. `UV_PROJECT_ENVIRONMENT` selects a separate environment per project in each account. Python installations and the wheel/download cache are shared through standard `UV_PYTHON_INSTALL_DIR` and `UV_CACHE_DIR` settings. A usable existing `.venv` is retained by one account; the other gets its own environment. Other existing environments are left in place. Shared `.venv` directories are not generally portable: interpreter links, console-script paths, and editable installations can contain machine-specific absolute paths. Environment-specific scripts and editable paths remain separate, with uv using its normal clone/copy installation policy. npm needs no cache-path adapter; it continues using its normal commands and local cache.
+
+Some mounted macOS filesystems reject `F_FULLFSYNC` while supporting `fsync`. Setup probes the actual project filesystem and, only where needed, builds a small compatibility library. The adapter loads it into the selected package-manager process: an unsupported full-flush request performs a real `fsync`, and write errors still propagate. The library does not carry into child applications. This also avoids rebuilding or pinning package-manager binaries after updates.
+
+Settings and helpers live under each account's `~/.config/project-tools` and `~/.local/share/project-tools`. Guest-installed files contain only local paths and neutral project-tool names. Commands outside registered projects retain their usual behavior. Setup changes configuration only; dependency installation and updates remain explicit. It does not make simultaneous installs into the same dependency tree safe; serialize those writes as for any shared checkout.
+
+### Updating from either Mac
+
+Package managers remain independently installed on each Mac; project manifests and lockfiles are shared. Use the ordinary commands below from either account. No automatic update, version pin, or machine-specific setting is added to the project.
+
+| Intent | Command | What the other Mac does |
+| --- | --- | --- |
+| Update pnpm itself | `pnpm self-update` | Keeps its own pnpm until you run the same command there; the adapter discovers the new executable automatically. |
+| Update pnpm project dependencies | `pnpm update --latest` | Compatible shared packages are immediately usable. If validation reports stale or damaged state, run `pnpm install --frozen-lockfile` to accept the shared lockfile without selecting newer releases. |
+| Update npm dependencies | `npm update` | Uses the shared installed tree. `npm install` reconciles a manifest/lockfile change; `npm ci` deliberately replaces the tree. |
+| Update uv project dependencies | `uv lock --upgrade` then `uv sync --locked` | `uv sync --locked` accepts the shared lockfile into its own environment. Normal `uv run` also reconciles that environment; `uv run --locked` additionally prevents lockfile edits. |
+| Update Python or a package manager installed by Homebrew | `uv python upgrade`, `uv self update`, or `brew upgrade TOOL`, as appropriate | Shared managed Python patches are reusable; tools installed separately are updated separately. Homebrew-owned uv directs self-updates to Homebrew. |
+
+An incompatible Node/native-addon ABI or CPU architecture still requires matching runtimes or rebuilding the affected dependencies. Keep shared-tree installs sequential. To preview reconciliation without changing the installed environment, use `pnpm install --frozen-lockfile --dry-run` or `uv sync --locked --dry-run`. To inspect before accepting an update, use `git diff -- package.json pnpm-lock.yaml pyproject.toml uv.lock` and the package manager's normal list/outdated commands. A validation failure stops execution and identifies the repair command; it never silently ignores missing packages or rewrites the lockfile to make a run pass.

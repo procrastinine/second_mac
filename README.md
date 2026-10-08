@@ -31,6 +31,8 @@ Therefore, I took [Tart](https://github.com/openai/tart) and [Softnet](https://g
 - **Updating the config:** just run `vm update`.
 - See [GUIDE.md](GUIDE.md) and [FEATURES.md](FEATURES.md) for more.
 
+Shared development projects can use ordinary package-manager commands from either Mac, even at different absolute paths. Run `vm projects setup ~/vmshare/example` once on the host for a pnpm, npm, or uv project. The setup retains pnpm's dependency checks, shares compatible packages and Python downloads, and keeps machine-specific settings outside the project's published files. See [local project tools](SHARING.md#local-project-tools) for existing environments and updates.
+
 ## Installation
 
 An Apple Silicon Mac with **macOS 26 or later** and an administrator account is

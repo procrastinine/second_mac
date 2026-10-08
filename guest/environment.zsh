@@ -10,3 +10,9 @@ export JAVA_HOME=/opt/homebrew/opt/openjdk/libexec/openjdk.jdk/Contents/Home
 export HOMEBREW_NO_ANALYTICS=1 LANG=en_US.UTF-8 EDITOR=nvim MPLBACKEND=Agg
 export DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib
 export PLAYWRIGHT_MCP_CONFIG="$HOME/.config/playwright-brave.json"
+# Native pnpm updates and optional project settings use stable user paths.
+export PNPM_HOME="${PNPM_HOME:-$HOME/Library/pnpm}"
+path=($PNPM_HOME/bin $path)
+if [[ -d $HOME/.local/share/project-tools/bin ]]; then
+  path=($HOME/.local/share/project-tools/bin $path)
+fi

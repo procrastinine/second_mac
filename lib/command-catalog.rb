@@ -12,7 +12,7 @@ module AgentVM
     GROUPS = {
       'Daily use'=>%w[status access start stop ssh tmux sudo cp gui mount unmount password],
       'Power and resources'=>%w[suspend resume reboot restart force-stop runtime resources],
-      'Access and controls'=>%w[shares network ports ui permissions guest-control auth audio microphone camera sip],
+      'Access and controls'=>%w[shares projects network ports ui permissions guest-control auth audio microphone camera sip],
       'Maintenance'=>%w[update apply doctor logs profiles agents pi codex claude menubar images cache check-sleep],
       'Copies and backups'=>%w[snapshot backup restore throwaway],
       'Help and completion'=>%w[help completion]
@@ -61,6 +61,11 @@ module AgentVM
     add 'resources', '[--json | --cpus N --memory GiB --disk GB]', 'Inspect resources or change allocations while stopped.',
       options:JSON_OPTION.merge('--cpus N'=>'Number of virtual CPUs.', '--memory GiB'=>'Memory in GiB.', '--disk GB'=>'Sparse disk capacity in decimal GB; growth only.'),
       details:'CPU/RAM changes apply at the next start. Disk growth is verified; shrinking is rejected.', examples:['vm resources --cpus 4 --memory 8', 'vm resources --json']
+    add 'projects', '[list | setup DIRECTORY | remove DIRECTORY]', 'Configure reusable local tools for shared pnpm/npm/uv projects.'
+    add 'projects list', '', 'List registered shared projects without starting the guest.'
+    add 'projects setup', 'DIRECTORY', 'Install local project settings on both Macs; project files are unchanged.', arguments:[:directory],
+      details:'Starts the guest if needed. Keeps pnpm verification enabled and uses separate uv environments. No dependencies are installed and no versions are pinned. Open a new shell afterward.', examples:['vm projects setup ~/vmshare/example']
+    add 'projects remove', 'DIRECTORY', 'Remove local settings on both Macs; retain dependencies and environments.', arguments:[:directory]
     add 'shares', '[configure OPTIONS]', 'Show or configure host folders exposed to the guest.'
     add 'shares configure', 'OPTIONS', 'Configure host sharing; existing host files are not moved.',
       options:{'--sharing MODE'=>'Sharing backend: hybrid, native, macfuse or none.', '--share PATH'=>'Writable host folder.', '--guest-share NAME'=>'Guest name for the writable folder.',

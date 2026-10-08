@@ -193,6 +193,8 @@ using authenticated, encrypted SMB through Tart's private channel. Mount/unmount
 and file browsing need no guest LAN exposure or SSH file tunnel. The relay ends
 when the VM stops. This is separate from host-to-guest VirtioFS sharing.
 
+**Shared development projects:** `vm projects setup DIRECTORY` configures pnpm, npm, and uv projects from the host. Different absolute checkout paths work without adding machine settings to the repository or pinning tool versions. pnpm retains its native dependency verification; uv shares Python installations and downloads while keeping path-dependent environments separate and adopting a usable existing `.venv`. A filesystem probe enables an actual `fsync` fallback where mounted filesystems reject full-sync requests. [Project-tool setup and limits](SHARING.md#local-project-tools) includes removal and ordinary update commands.
+
 ## Storage, retained copies and backups
 
 - **Resource controls:** `vm resources` reports CPU/RAM allocation, sparse-disk

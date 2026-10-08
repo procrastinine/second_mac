@@ -29,6 +29,8 @@ startup files. These use the macOS system Ruby and Bash, including Bash 3.2.
 Image-cache fixtures separately exercise macOS 26 and 27 host metadata; a
 mocked Tart command must not replace the host OS version used for cache matching.
 
+Project-tool tests cover registration without project-file changes, nested scopes, tool upgrades, existing and broken Python environments, missing transitive packages, native flush errors, and forwarding of file-control calls. Manual integration additionally verified two Macs at different absolute paths: pnpm and uv dependency changes in both directions, lockfile reconciliation, offline Python/download reuse, npm install/update, and actual Electron launches. These checks preserve the package managers' own policy and dependency validation.
+
 With a logged-in graphical macOS session, an additional window lifecycle check
 is available:
 
