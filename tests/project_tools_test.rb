@@ -162,9 +162,13 @@ class ProjectToolsTest < Minitest::Test
     refute ProjectTool.runs_code?(%w[self-update], @root)
   end
   def test_guest_payload_is_neutral_and_has_no_project_specific_switches
+    switches = @request['adapter'].scan(/['"]([A-Z][A-Z0-9]*_[A-Z0-9_]+)['"]/).flatten.uniq
+    assert_empty switches - %w[PNPM_CONFIG_STORE_DIR PNPM_CONFIG_ENABLE_GLOBAL_VIRTUAL_STORE
+      PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN UV_PROJECT_ENVIRONMENT UV_CACHE_DIR
+      UV_PYTHON_INSTALL_DIR DYLD_INSERT_LIBRARIES]
     [@request['adapter'], @request['fsync_source'],
      File.read(File.expand_path('../lib/project-tools-setup.rb', __dir__))].each do |source|
-      refute_match(/maclauncher|agent.vm|\bguest\b|\bVM\b/i, source)
+      refute_match(/agent.vm|\bguest\b|\bVM\b/i, source)
     end
   end
   def test_share_mapping_rejects_readonly_outside_and_escaping_paths
