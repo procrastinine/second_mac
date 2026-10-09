@@ -3,9 +3,45 @@ require_relative 'ui-build'
 require_relative 'sip'
 require 'socket'
 require 'base64'
+require_relative '../guest/control-commands'
 
 module AgentVM
   class Desktop < Recovery
+    class UnsupportedInput < Error; end
+    def capabilities
+      value = request({'op'=>'status'}, timeout:5)
+      modern = value.fetch('features', []).include?('pointer-v2')
+      timed = value.fetch('features', []).include?('key-hold-v1')
+      {'width'=>value.fetch('width',1024), 'height'=>value.fetch('height',768),
+       'origin'=>'top-left', 'operations'=>%w[inspect screenshot click click-text key type] + (modern ? %w[move drag scroll] : []),
+       'extended_click'=>modern, 'pointer_update_pending'=>!modern,
+       'timed_keys'=>timed, 'key_hold_ms'=>timed ? value['key_hold_ms'] : nil,
+       'key_hold_range_ms'=>timed ? value['key_hold_range_ms'] : nil, 'key_timing_update_pending'=>!timed}
+    end
+    def pointer(value)
+      MacControlCommands.validate_pointer(value)
+      if value['op'] == 'click' && value.fetch('button','left') == 'left' && value.fetch('count',1) == 1
+        return request(value.select { |k,_| %w[op x y].include?(k) })
+      end
+      raise UnsupportedInput, 'The running viewer needs an update and a later VM restart for this pointer action. Existing click, key, typing, OCR and screenshot commands still work.' unless capabilities['extended_click']
+      request(value)
+    rescue MacControlCommands::Error => e
+      raise Error, e.message
+    end
+    def type(value)
+      MacControlCommands.validate_text(value)
+      # Validate the entire string before sending any input. Do not partially
+      # type a password and only then discover an unsupported character.
+      value.split(/([\n\t])/).each do |part|
+        case part
+        when "\n" then key(KEYS.fetch('return'))
+        when "\t" then key(KEYS.fetch('tab'))
+        else super(part)
+        end
+      end
+    rescue MacControlCommands::Error => e
+      raise Error, e.message
+    end
     def request(value, timeout:180)
       path = File.join(@vm.tart_directory, 'ui.sock')
       raise Error, 'Guest UI is unavailable. Enable it once with vm ui enable --restart, or start an already enabled VM.' unless @vm.running? && File.socket?(path)
@@ -93,14 +129,27 @@ module AgentVM
       raise Error, "Expected one visible match for #{value.inspect}; found #{rows.length}. Use vm ui inspect or click X Y." unless rows.length == 1
       click(rows.first)
     end
-    def keyboard(shortcut)
+    def keyboard(shortcut, hold_ms:nil)
+      MacControlCommands.validate_key({'op'=>'key','key'=>shortcut}.merge(hold_ms.nil? ? {} : {'hold_ms'=>hold_ms}))
       parts = shortcut.downcase.split('+')
       name = parts.pop
       modifiers = {'shift'=>1<<17, 'ctrl'=>1<<18, 'control'=>1<<18, 'alt'=>1<<19, 'option'=>1<<19, 'cmd'=>1<<20, 'command'=>1<<20}
       flags = parts.reduce(0) { |all,p| all | modifiers.fetch(p) { raise Error, 'Unknown key modifier.' } }
-      code = KEYS[name] || PLAIN[name]
+      extra = {'backspace'=>51, 'delete'=>51, 'forward-delete'=>117, 'home'=>115, 'end'=>119,
+               'pageup'=>116, 'pagedown'=>121, 'f1'=>122, 'f3'=>99, 'f4'=>118, 'f5'=>96,
+               'f6'=>97, 'f7'=>98, 'f8'=>100, 'f9'=>101, 'f10'=>109, 'f11'=>103, 'f12'=>111}
+      name = {'comma'=>',', 'period'=>'.', 'plus'=>'+', 'minus'=>'-'}.fetch(name,name)
+      flags |= 1<<17 if SHIFTED.key?(name)
+      code = KEYS[name] || extra[name] || PLAIN[SHIFTED.fetch(name,name)]
       raise Error, 'Unknown key. Examples: return, tab, cmd+shift+p.' unless code
-      key(code, flags:flags)
+      if hold_ms
+        raise UnsupportedInput, 'The running viewer needs an update and a later VM restart for timed key holds. Legacy key commands still work but can miss apps that poll held-key state.' unless capabilities['timed_keys']
+        key(code, flags:flags, hold_ms:hold_ms)
+      else
+        key(code, flags:flags)
+      end
+    rescue MacControlCommands::Error => e
+      raise Error, e.message
     end
     def approve_once
       page = screen
@@ -146,31 +195,27 @@ module AgentVM
       raise Error, 'Start this VM first with vm start.' unless @vm.running?
       case action
       when 'status' then puts JSON.pretty_generate(request({'op'=>'status'}, timeout:5))
+      when 'capabilities' then puts JSON.pretty_generate(capabilities)
       when 'inspect' then puts JSON.pretty_generate(screen)
       when 'screenshot'
-        raise Error, 'Usage: vm ui screenshot > image.png' unless args.empty?
-        $stdout.binmode
-        $stdout.write(Base64.strict_decode64(request({'op'=>'screenshot'}).fetch('png')))
+        raise Error, 'Usage: vm ui screenshot [FILE.png|-]' if args.length > 1
+        MacControlCommands.screenshot(request({'op'=>'screenshot'}), path:args.first)
       when 'click-text'
         raise Error, 'Usage: vm ui click-text LABEL' unless args.length == 1
         click_text(args.first)
-      when 'click'
-        raise Error, 'Usage: vm ui click X Y' unless args.length == 2
-        x, y = args.map { |n| Float(n) }
-        raise Error, 'Guest coordinates must be finite numbers.' unless x.finite? && y.finite?
-        send_command({'op'=>'click','x'=>x,'y'=>y})
+      when *MacControlCommands::POINTER
+        pointer(MacControlCommands.pointer(action, args))
       when 'key'
-        raise Error, 'Usage: vm ui key SHORTCUT' unless args.length == 1
-        keyboard(args.first)
+        command = MacControlCommands.key(args)
+        keyboard(command.fetch('key'), hold_ms:command['hold_ms'])
       when 'type'
-        raise Error, 'Usage: vm ui type < text (US keyboard, printable ASCII)' unless args.empty?
-        value = $stdin.read(65537)
-        raise Error, 'Type accepts up to 64 KiB.' if value.bytesize > 65536
-        type(value)
+        type(MacControlCommands.text(args))
       when 'show', 'hide' then request({'op'=>action}, timeout:5)
       when 'approve' then puts(approve_once ? 'Approved a guest permission dialog.' : 'No recognized guest permission dialog.')
       else raise Error, 'Usage: vm ui enable|disable [--restart]|status|inspect|screenshot|click-text LABEL|click X Y|key SHORTCUT|type|show|hide|approve'
       end
+    rescue MacControlCommands::Error => e
+      raise Error, e.message
     rescue ArgumentError
       raise Error, 'Invalid guest UI argument.'
     end

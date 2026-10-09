@@ -29,8 +29,9 @@ Advanced build selection stays in `vm runtime`; SwiftBar shows everyday actions.
 | Sleep-friendly SSH settings | Disabled heartbeat/idle expiry lets host sleep pause the existing transport. It targets the same connection surviving wake, without keeping the host awake. Actual lid-close survival needs the per-machine `vm check-sleep` test; it is not guaranteed. |
 | Agent-friendly tmux | `vm tmux` creates or attaches sessions. Mouse scrollback, Option-click support, large history, extended keys, activity indicators and explicit clipboard copying are configured. Tmux remains optional for ordinary shells. |
 | Password and login convenience | A generated guest administrator password, `vm password` to copy it to the host clipboard, and optional native automatic desktop login. Automatic login does not unlock a manually locked desktop. |
+| Explicit clipboard transfers | One SwiftBar Clipboard submenu and `vm clipboard to-guest` / `to-host` copy plain text once, up to 1 MiB. `vm password --guest` writes directly to the guest clipboard. No automatic sync, background clipboard reads or guest-initiated host access. |
 | Access report | `vm access` shows configured and actually attached shares, forwarded ports, media and guest-control grants; JSON output is available. |
-| SwiftBar | A monochrome status icon, start/stop/reboot, suspend/resume, show/hide desktop, shell, tmux sessions, Finder mounts, shared folders, networking and forwards. Resources include CPU/memory and storage; retained copies have their own controls. Polling never starts a stopped VM. |
+| SwiftBar | A monochrome status icon, start/stop/reboot, suspend/resume, show/hide desktop, shell, tmux sessions, Finder mounts, shared folders, networking and forwards. Clipboard actions share one submenu; playback offers only Mute or Unmute according to the guest's current state. Resources include CPU/memory and storage; retained copies have their own controls. Polling never starts a stopped VM. |
 
 The menu has one update/check pair for **VM tools** and another for **guest
 macOS**. It does not ask users to manage Second Mac and Tart separately.
@@ -42,6 +43,7 @@ from the host's `vm` command.
 | Addition | Availability and interruption |
 | --- | --- |
 | Desktop on demand | `vm gui` shows the desktop and `vm gui --hide` hides it while shells and background work continue. Regular Tart starts with a hidden native window ready to show. After a strict headless start, creating a viewer live requires the **custom build**; regular Tart needs a cold restart. No VNC server is enabled. |
+| Guest app shortcuts | The custom viewer routes Command key presses and releases, including settings, copy and paste, to its focused guest view before host menu handling. No host Accessibility permission or global event tap. Viewer fixes activate at the next cold VM start. |
 | No idle host rendering with the custom build | Hidden means the view is disconnected from the VM, with its window removed from display. Opening the GUI attaches it live; screenshots/OCR attach it only for the request. Guest graphics and Metal remain available. Visible viewing and active capture still have a resource cost. |
 | Close without stopping work | Closing the **custom build's** viewer hides it. With regular Tart, use Hide instead of closing its window. |
 | Output-only audio | `vm audio on` lets the guest play through host speakers/headphones, including headlessly, with no host microphone source. Requires the **custom build**. Attaching/removing audio takes effect at the next cold start; `--restart` explicitly applies it now. |
@@ -60,12 +62,21 @@ the host, rather than audio support itself.
 
 ## Guest UI and permission automation
 
-The optional **custom UI controller** provides screenshots, clicks, key presses,
-typing and local Apple Vision OCR through `vm ui`. It runs in the host VM
+The optional **custom UI controller** provides screenshots, left/right/multiple
+clicks, pointer movement, timed drags, scrolling, key presses, typing and local
+Apple Vision OCR through `vm ui` and guest `mac-control`. It runs in the host VM
 process and addresses only that guest's display and virtual input devices.
 It needs no guest UI server, host Accessibility control or guest screen-recording
 permission. OCR needs no LLM, API key, cloud service or Apple Intelligence model
 download.
+The guest helper saves screenshots directly to PNG files, accepts text arguments
+or stdin, and offers guest-local Unicode paste. Its installable
+[SKILL.md](guest/skills/mac-control/SKILL.md) is available with `mac-control skill install`.
+`mac-control capabilities` reports which gestures the running viewer supports;
+an older viewer keeps basic input working until its next cold start.
+Updated viewers also hold keys for 80 ms by default, with explicit
+`key SHORTCUT --hold-ms MILLISECONDS` durations of 10–5000 ms for held-state input.
+Capabilities report whether key timing is active; legacy viewers reject explicit durations.
 
 - **One-shot consent:** `vm ui approve` approves a recognized guest permission
   dialog. `vm ui inspect` and `vm ui click-text` support explicit UI workflows.
@@ -100,8 +111,9 @@ host media, SIP or VM lifecycle. Guest apps can still edit files already shared
 with them. Retained copies start with delegation and automatic approval off.
 
 These are deterministic English UI workflows, not a universal consent API.
-The guest desktop must be logged in and unlocked; typed input assumes printable
-ASCII and a US keyboard. Unrecognized screens are not automatically approved. Automatic
+The guest desktop must be logged in and unlocked; typed input assumes ASCII
+(including Tab/Return) and a US keyboard. Unicode paste uses only the guest's
+clipboard. Unrecognized screens are not automatically approved. Automatic
 approval is a broad opt-in convenience, not an application security policy.
 The input controller uses version-sensitive private framework interfaces;
 host permission prompts are never automated.

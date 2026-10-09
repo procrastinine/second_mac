@@ -5,6 +5,9 @@ require 'securerandom'
 require 'etc'
 
 module GuestControlInstall
+  SOURCES = {'control-client.rb'=>'guest/control-client.rb', 'control-commands.rb'=>'guest/control-commands.rb',
+             'clipboard.js'=>'lib/clipboard.js', 'skills/mac-control/SKILL.md'=>'guest/skills/mac-control/SKILL.md',
+             'core.rb'=>'lib/core.rb', 'profile-plan.rb'=>'lib/profile-plan.rb'}.freeze
   # Exact retired releases, so a different user-installed command with either
   # old name is never removed. No compatibility alias is installed.
   LEGACY_DIGESTS = {

@@ -52,6 +52,7 @@ require_relative 'suspend'
 require_relative 'power'
 require_relative 'build-cache'
 require_relative 'credentials'
+require_relative 'clipboard'
 $stdout.sync = true
 begin
   name = nil
@@ -90,6 +91,7 @@ begin
   end
   case command
   when 'auth' then AgentVM::Credentials.new(vm).command(ARGV)
+  when 'clipboard' then AgentVM::Clipboard.new(vm).command(ARGV)
   when 'access' then AgentVM::Access.new(vm).command(ARGV)
   when 'audio' then AgentVM::Audio.new(vm).command(ARGV)
   when 'runtime' then AgentVM::Runtime.new(vm).command(ARGV)
@@ -218,8 +220,7 @@ begin
   when 'password'
     if ARGV == ['--guest']
       vm.start unless vm.running?
-      AgentVM::Permissions.new(vm).install_client
-      vm.ssh(vm.home + '/.local/bin/mac-control', 'password', '--local')
+      AgentVM::Clipboard.new(vm).copy_password
     else
       AgentVM.password_command(vm.password, ARGV)
     end

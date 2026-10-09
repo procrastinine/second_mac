@@ -57,6 +57,22 @@ and reuses the same content-addressed cache as the installer. Neither command
 activates a build in an existing VM. Successful compilation does not replace
 live desktop/input testing on a supported host macOS version.
 
+Explicit clipboard and keyboard checks in a host WindowServer session:
+
+```sh
+ruby tests/clipboard-check.rb          # Private named pasteboards on this Mac
+ruby tests/clipboard-check.rb --guest  # Same checks through a running guest's SSH
+bash tests/keyboard-check.sh           # Events stay inside a synthetic test app
+```
+
+The clipboard checks never read or replace the ordinary host or guest clipboard.
+They cover Unicode and trailing newlines, independent later copies, a synthetic
+password sent directly to the guest, and failed reads preserving the destination.
+The keyboard check exercises Command-comma, copy/paste, selection, quit/close,
+undo, combined modifiers, key releases and focus through AppKit's event queue.
+It uses the production display code with a test view, not a booted guest; actual
+guest app behavior still requires a run with the updated viewer.
+
 Coverage includes:
 
 - Host credential relay authentication, transparent request forwarding,
@@ -105,6 +121,18 @@ Coverage includes:
 - Guest-control loopback binding, authentication/revocation, operation scopes,
   input limits, serialization, private client credentials, optional autostart,
   one-boot grants, stop-time revocation and stale generations.
+- Guest pointer bounds and bounded gestures, the native drag/release event plan,
+  native wheel-event construction, legacy-viewer capability checks, complete
+  text validation before input, guest-local paste transport, private PNG writes,
+  and offline/idempotent skill installation with customized-file protection.
+- Native key durations, held-state polling at 30/60/120 Hz with multiple polling
+  phases, and reproduction of missed polls using the old immediate down/up
+  sequence. Checks include delayed device sends, modifier ordering, failed down
+  and up sends, bounded release retries, abandoned callers, and memory-save
+  guards. The native command test measures actual `_VZKeyEvent` sends into a
+  recording device and disconnects a real private socket before release.
+  These controlled receiver tests do not qualify arbitrary games; the
+  updated viewer still needs app-specific checks inside a running guest.
 - Content-based guest update receipts, deferred releases collapsing into one
   application, no-op updates, failed-update retries, restored disks, optional
   camera helper refresh, preserving VM running/stopped state, and excluding

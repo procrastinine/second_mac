@@ -60,6 +60,15 @@ class AudioTest < Minitest::Test
     AgentVM.json_write(@vm.file('access-launch.json'), {'pid'=>999, 'audio_output'=>true})
     assert_nil @audio.attached
   end
+  def test_muted_query_preserves_unknown_state_and_never_contacts_a_stopped_guest
+    %w[true false unexpected].zip([true, false, nil]).each do |response, expected|
+      @vm.stub(:rpc, response + "\n") { expected.nil? ? assert_nil(@audio.muted?) : assert_equal(expected, @audio.muted?) }
+    end
+    @vm.stub(:rpc, ->(*) { raise AgentVM::Error, 'unavailable' }) { assert_nil @audio.muted? }
+    @vm.stub(:running?, false) do
+      @vm.stub(:rpc, ->(*) { raise 'Stopped guest was polled' }) { assert_nil @audio.muted? }
+    end
+  end
   def test_legacy_audio_choice_is_preserved_but_new_input_and_output_are_independent
     config = AgentVM.validate(AgentVM::DEFAULTS.merge('microphone'=>true))
     assert config['audio_output']

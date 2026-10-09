@@ -10,7 +10,7 @@ module AgentVM
       @digest ||= source_digest
     end
     def source_digest
-      files = [__FILE__] + %w[display tart-patches].flat_map { |part| Dir.glob(File.join(__dir__, part, '**', '*')) }.select { |p| File.file?(p) }.sort
+      files = [__FILE__] + %w[display tart-patches third-party].flat_map { |part| Dir.glob(File.join(__dir__, part, '**', '*')) }.select { |p| File.file?(p) }.sort
       Digest::SHA256.hexdigest(files.map { |p| Digest::SHA256.file(p).hexdigest }.join)
     end
     def release_tag
@@ -206,6 +206,7 @@ module AgentVM
         %w[LICENSE NOTICE].each do |name|
           FileUtils.cp(File.join(source, name), File.join(directory, name)) if File.file?(File.join(source, name))
         end
+        FileUtils.cp(File.join(__dir__, 'third-party/CUA-LICENSE.txt'), File.join(directory, 'CUA-LICENSE.txt'))
         AgentVM.json_write(File.join(directory, 'manifest.json'), {'tart_version'=>version, 'upstream_commit'=>commit,
           'source_digest'=>digest, 'binary_sha256'=>Digest::SHA256.file(binary).hexdigest})
         @vm.exclude_backup(directory, source)

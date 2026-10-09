@@ -104,3 +104,20 @@ provide a pristine environment or conceal the source guest's existing data.
 New copies inherit the source's current macOS without another download. Older
 retained copies can keep older OS blocks alive. There is no automatic migration
 between OS generations.
+## GUI control code reuse
+
+[Cua](https://github.com/trycua/cua) includes macOS mouse, keyboard and scrolling
+drivers. Second Mac adapts its move/down/interpolated-drag/up gesture plan and
+pointer priming for scroll, delivering events through the VM's virtual devices.
+The adapted code records its upstream revision in `lib/display/Pointer.h` and
+retains the [Cua MIT license](lib/third-party/CUA-LICENSE.txt).
+
+[Peekaboo](https://github.com/openclaw/Peekaboo) offers richer Accessibility
+targeting, screenshots and clipboard workflows; [cliclick](https://github.com/BlueM/cliclick)
+offers compact macOS mouse/keyboard commands. Their native OS input routes need
+permissions on the Mac they control. Second Mac keeps its existing VM backend,
+Apple Vision OCR and automated guest Settings workflows, so these extra controls
+need no additional GUI server, model downloads or host Accessibility grants.
+Guest-local explicit paste covers Unicode without granting access to the host
+clipboard. These tools remain useful for applications needing deeper semantic
+Accessibility automation inside a guest.

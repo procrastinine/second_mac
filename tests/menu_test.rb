@@ -61,6 +61,54 @@ class MenuTest < Minitest::Test
     assert_includes output, 'Unmount VM disk | href=file:'
     assert_operator output.index('Unmount VM disk'), :<, output.index('Tmux sessions')
   end
+  def test_clipboard_menu_never_reads_clipboards_and_actions_are_explicit
+    @vm.define_singleton_method(:ssh) { |*| raise 'Menu must never read a clipboard' }
+    AgentVM::Clipboard.stub(:new, ->(*) { raise 'Menu must not create a clipboard reader' }) do
+      output = render(false)
+      assert_includes output, "\nClipboard\n"
+      refute_includes output, 'Host text → guest |'
+      @vm.define_singleton_method(:running?) { true }
+      rows = @menu.clipboard_lines(@vm, ['menu-action'], busy:false)
+      %w[to-guest to-host].each_with_index do |direction, index|
+        path = URI::DEFAULT_PARSER.unescape(URI.parse(rows[index + 1].split('href=').last.strip).path)
+        plist = JSON.parse(AgentVM.run('/usr/bin/plutil', '-convert', 'json', '-o', '-', File.join(path, 'Contents/Info.plist'), capture:true))
+        assert_equal ['menu-action', 'clipboard', direction], plist.fetch('ActionArguments')
+      end
+      path = URI::DEFAULT_PARSER.unescape(URI.parse(rows[4].split('href=').last.strip).path)
+      plist = JSON.parse(AgentVM.run('/usr/bin/plutil', '-convert', 'json', '-o', '-', File.join(path, 'Contents/Info.plist'), capture:true))
+      assert_equal ['menu-action', 'password', '--guest'], plist.fetch('ActionArguments')
+      assert_empty @menu.clipboard_lines(@vm, ['menu-action'], busy:true)
+    end
+  end
+
+  def test_frozen_copies_offer_clipboard_only_when_their_runtime_supports_it
+    @vm.config['throwaway'] = {'id'=>'0123abcd'}
+    refute @menu.clipboard_lines(@vm, [], busy:false).any? { |row| row.include?('Host text') }
+    AgentVM.write(@vm.file('runtime/lib/clipboard.rb'), '# saved implementation')
+    @vm.define_singleton_method(:running?) { true }
+    rows = @menu.clipboard_lines(@vm, ['menu-action', 'throwaway', '0123abcd'], busy:false, prefix:'----')
+    assert_equal 6, rows.length
+    path = URI::DEFAULT_PARSER.unescape(URI.parse(rows[1].split('href=').last.strip).path)
+    plist = JSON.parse(AgentVM.run('/usr/bin/plutil', '-convert', 'json', '-o', '-', File.join(path, 'Contents/Info.plist'), capture:true))
+    assert_equal ['menu-action', 'throwaway', '0123abcd', 'clipboard', 'to-guest'], plist.fetch('ActionArguments')
+  end
+
+  def test_audio_menu_has_only_the_relevant_action_and_never_guesses_unknown_state
+    audio = Struct.new(:attached, :muted?).new(true, false)
+    AgentVM::Audio.stub(:new, audio) do
+      rows = @menu.sound_lines(@vm, ['menu-action'])
+      assert_equal 1, rows.length
+      assert_match(/^Mute guest playback \|/, rows.first)
+      audio[:muted?] = true
+      rows = @menu.sound_lines(@vm, ['menu-action'])
+      assert_equal 1, rows.length
+      assert_match(/^Unmute guest playback \|/, rows.first)
+      audio[:muted?] = nil
+      refute_includes @menu.sound_lines(@vm, ['menu-action']).join, 'href='
+      audio.attached = false
+      assert_empty @menu.sound_lines(@vm, ['menu-action'])
+    end
+  end
   def test_service_autostart_and_key_entry_use_common_commands_without_a_guest_probe
     AgentVM::HostCredentials.prepare
     output = render(false)

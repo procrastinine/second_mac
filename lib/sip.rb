@@ -25,7 +25,7 @@ module AgentVM
         AgentVM.run('/usr/bin/xcrun', 'clang', '-O2', '-fmodules', '-fobjc-arc', '-mmacosx-version-min=14.4',
                     '-fmodules-cache-path=' + @vm.file('swift-module-cache'),
                     '-framework', 'AppKit', '-framework', 'Virtualization', '-framework', 'Vision', '-framework', 'ScreenCaptureKit',
-                    '-I' + File.join(display, 'include'), source, File.join(display, 'Display.m'), '-o', binary, timeout:120)
+                    '-I' + File.join(display, 'include'), source, File.join(display, 'Display.m'), File.join(display, 'Keyboard.m'), '-o', binary, timeout:120)
         entitlement = @vm.file('recovery-entitlements.plist')
         AgentVM.write(entitlement, AgentVM.plist('com.apple.security.virtualization'=>true))
         AgentVM.run('/usr/bin/codesign', '--force', '--sign', '-', '--entitlements', entitlement, binary, capture:true)
@@ -104,9 +104,11 @@ module AgentVM
     def screen
       send_command({'op'=>'screen'})
     end
-    def key(name, flags:0)
+    def key(name, flags:0, hold_ms:nil)
       code = name.is_a?(Integer) ? name : KEYS.fetch(name)
-      send_command({'op'=>'key', 'code'=>code, 'flags'=>flags})
+      command = {'op'=>'key', 'code'=>code, 'flags'=>flags}
+      command['hold_ms'] = hold_ms unless hold_ms.nil?
+      send_command(command)
       sleep 0.15
     end
     def type(text)

@@ -1,4 +1,5 @@
 require_relative 'core'
+require_relative '../guest/install-control'
 
 module AgentVM
   # Reconcile the latest desired configuration, not a queue of release scripts.
@@ -19,7 +20,7 @@ module AgentVM
       {
         'configuration'=>fingerprint(guest + %w[lib/core.rb lib/profile-plan.rb lib/autologin.rb lib/guest-update.rb],
                                      AgentVM.guest_config(@vm.config).merge('transport_version'=>@vm.config['tart_guest_agent_version'])),
-        'helpers'=>fingerprint(%w[guest/control-client.rb guest/install-control.rb lib/core.rb lib/profile-plan.rb lib/permissions.rb],
+        'helpers'=>fingerprint(GuestControlInstall::SOURCES.values + %w[guest/install-control.rb lib/permissions.rb],
                                'user'=>@vm.config['user'], 'ui_enabled'=>@vm.config['ui_enabled']),
         'camera'=>fingerprint(%w[guest/camera-sink.m guest/camera-receiver.rb lib/camera.rb])
       }
@@ -41,7 +42,7 @@ module AgentVM
       wanted.any? { |key, digest| value.fetch('applied', {})[key] != digest }
     end
     def probe
-      value = @vm.ssh('/usr/bin/ruby', '-rjson', '-rdigest', '-e', <<~'RUBY', capture:true)
+      value = @vm.ssh('/usr/bin/ruby', '-rjson', '-rdigest', '-e', <<~'RUBY', '--', *GuestControlInstall::SOURCES.keys, capture:true)
         path = '/etc/agent-vm/applied-updates.json'
         begin
           applied = File.file?(path) ? JSON.parse(File.read(path)) : {}
@@ -50,7 +51,7 @@ module AgentVM
           applied = {}
         end
         base = '/usr/local/libexec/agent-vm/'
-        helpers = %w[control-client.rb core.rb profile-plan.rb].to_h do |name|
+        helpers = ARGV.to_h do |name|
           file = base + name
           [name, File.file?(file) && !File.symlink?(file) ? Digest::SHA256.file(file).hexdigest : nil]
         end
@@ -62,8 +63,7 @@ module AgentVM
       JSON.parse(value)
     end
     def helpers_current?(actual)
-      {'control-client.rb'=>'guest/control-client.rb', 'core.rb'=>'lib/core.rb', 'profile-plan.rb'=>'lib/profile-plan.rb',
-       'command'=>'guest/control-client.rb'}.all? do |name, path|
+      GuestControlInstall::SOURCES.merge('command'=>'guest/control-client.rb').all? do |name, path|
         actual[name] == Digest::SHA256.file(File.join(source, path)).hexdigest
       end
     end

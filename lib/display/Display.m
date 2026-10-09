@@ -9,6 +9,8 @@
 #import <fcntl.h>
 #import <sys/stat.h>
 #import <unistd.h>
+#import "Pointer.h"
+#import "Keyboard.h"
 @interface NSObject (VMPrivate)
 - (NSArray *)_keyboards;
 - (NSArray *)_pointingDevices;
@@ -16,6 +18,10 @@
 - (id)initWithLocation:(CGPoint)location pressedButtons:(NSInteger)buttons;
 - (CGPoint)location;
 - (void)sendPointerEvents:(NSArray *)events;
+- (void)sendScrollWheelEvents:(NSArray *)events;
+- (id)initWithScrollingDeltaX:(double)x scrollingDeltaY:(double)y
+    acceleratedScrollingDeltaX:(double)ax acceleratedScrollingDeltaY:(double)ay
+    scrollPhase:(NSUInteger)phase momentumPhase:(NSUInteger)momentum;
 
 - (void)sendKeyEvents:(NSArray *)events;
 - (id)initWithEvent:(NSEvent *)event;
@@ -33,6 +39,22 @@ static void prepareDisplay(void);
 static BOOL desktopIsVisible(void) {
   return desktopVisible && !NSApp.hidden && !window.miniaturized && window.visible;
 }
+
+// NSApplication treats Command combinations as menu shortcuts and can drop
+// their key-up events before NSWindow receives them. This in-process monitor
+// forwards both halves only while our VM view owns focus. It observes no other
+// application's events and requires no host Accessibility permission.
+static id shortcutMonitor;
+static NSEvent *forwardGuestShortcut(NSEvent *event) {
+  if (desktopIsVisible() && view.virtualMachine &&
+      window.firstResponder == view && event.window == window &&
+      (event.modifierFlags & NSEventModifierFlagCommand)) {
+    if (event.type == NSEventTypeKeyDown) { [view keyDown:event]; return nil; }
+    if (event.type == NSEventTypeKeyUp) { [view keyUp:event]; return nil; }
+  }
+  return event;
+}
+
 static void releaseHiddenDisplay(void) {
   if (displayInUse || desktopIsVisible() || !window)
     return;
@@ -226,6 +248,9 @@ static SMWindowDelegate *windowDelegate;
 void SMDisplayInitialize(VZVirtualMachine *machine) {
   [NSApplication sharedApplication];
   vm = machine;
+  if (!shortcutMonitor)
+    shortcutMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown | NSEventMaskKeyUp
+        handler:^NSEvent *(NSEvent *event) { return forwardGuestShortcut(event); }];
   if (!windowDelegate) {
     windowDelegate = [SMWindowDelegate new];
     for (NSString *name in @[NSApplicationDidHideNotification, NSApplicationDidUnhideNotification])
@@ -374,8 +399,7 @@ static void screen(NSDictionary *command) {
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)),
                  dispatch_get_main_queue(), ^{ captureScreen(command); });
 }
-static void keyEvent(unsigned short code, NSEventType type) {
-  id keyboard = [vm _keyboards].firstObject;
+static void keyEvent(id keyboard, unsigned short code, NSEventType type) {
   NSEvent *event =
       [NSEvent keyEventWithType:type
                              location:NSZeroPoint
@@ -390,22 +414,40 @@ static void keyEvent(unsigned short code, NSEventType type) {
   [keyboard sendKeyEvents:@[ [[NSClassFromString(@"_VZKeyEvent") alloc]
                               initWithEvent:event] ]];
 }
-static void key(unsigned short code, NSEventModifierFlags flags) {
-  NSMutableArray *modifiers = [NSMutableArray array];
-  if (flags & NSEventModifierFlagShift)
-    [modifiers addObject:@56];
-  if (flags & NSEventModifierFlagControl)
-    [modifiers addObject:@59];
-  if (flags & NSEventModifierFlagOption)
-    [modifiers addObject:@58];
-  if (flags & NSEventModifierFlagCommand)
-    [modifiers addObject:@55];
-  for (NSNumber *m in modifiers)
-    keyEvent(m.unsignedShortValue, NSEventTypeKeyDown);
-  keyEvent(code, NSEventTypeKeyDown);
-  keyEvent(code, NSEventTypeKeyUp);
-  for (NSNumber *m in modifiers.reverseObjectEnumerator)
-    keyEvent(m.unsignedShortValue, NSEventTypeKeyUp);
+static void pointerEvent(NSDictionary *step, NSInteger buttons) {
+  NSPoint p = NSMakePoint([step[@"x"] doubleValue] * view.bounds.size.width / 1024,
+      (768 - [step[@"y"] doubleValue]) * view.bounds.size.height / 768);
+  NSEvent *event = [NSEvent mouseEventWithType:NSEventTypeMouseMoved location:p
+      modifierFlags:0 timestamp:NSProcessInfo.processInfo.systemUptime
+      windowNumber:window.windowNumber context:nil eventNumber:0 clickCount:0 pressure:0];
+  Class cls = NSClassFromString(@"_VZScreenCoordinatePointerEvent");
+  CGPoint location = [(NSObject *)[[cls alloc] initWithEvent:event view:view] location];
+  // The adapter reads host physical buttons; replace them with explicit guest bits.
+  [[vm _pointingDevices].firstObject sendPointerEvents:@[
+      [[cls alloc] initWithLocation:location pressedButtons:buttons]]];
+}
+static void pointerSteps(NSArray *steps, NSUInteger index, NSTimeInterval start) {
+  NSDictionary *step = steps[index];
+  NSTimeInterval delay = MAX(0, start + [step[@"at"] doubleValue] - NSProcessInfo.processInfo.systemUptime);
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    @try {
+      if (step[@"dx"]) {
+        double dx = [step[@"dx"] doubleValue], dy = [step[@"dy"] doubleValue];
+        id event = [[NSClassFromString(@"_VZScrollWheelEvent") alloc]
+            initWithScrollingDeltaX:dx scrollingDeltaY:dy
+            acceleratedScrollingDeltaX:dx acceleratedScrollingDeltaY:dy scrollPhase:0 momentumPhase:0];
+        [[vm _pointingDevices].firstObject sendScrollWheelEvents:@[event]];
+      } else {
+        pointerEvent(step, [step[@"buttons"] integerValue]);
+      }
+      if (index + 1 < steps.count) pointerSteps(steps, index + 1, start);
+      else reply(@{@"ok":@YES});
+    } @catch (NSException *exception) {
+      // Do not leave a guest mouse button held after a failed gesture.
+      @try { pointerEvent(step, 0); } @catch (NSException *ignored) {}
+      reply(@{@"error":@"Guest pointer operation failed; inspect the screen before retrying"});
+    }
+  });
 }
 static void handle(NSDictionary *c) {
   NSString *op = c[@"op"];
@@ -415,7 +457,10 @@ static void handle(NSDictionary *c) {
   }
   if ([op isEqual:@"status"]) {
     reply(@{
-      @"version" : @1,
+      @"version" : @3,
+      @"features" : @[ @"pointer-v2", @"key-hold-v1" ],
+      @"key_hold_ms" : @(SMKeyDefaultHoldMS),
+      @"key_hold_range_ms" : @[ @(SMKeyMinHoldMS), @(SMKeyMaxHoldMS) ],
       @"pid" : @(getpid()),
       @"width" : @1024,
       @"height" : @768,
@@ -451,70 +496,55 @@ static void handle(NSDictionary *c) {
     return;
   }
   if ([op isEqual:@"key"]) {
+    id hold = c[@"hold_ms"] ?: @(SMKeyDefaultHoldMS);
+    id flags = c[@"flags"] ?: @0;
+    NSUInteger allowed = NSEventModifierFlagShift | NSEventModifierFlagControl |
+        NSEventModifierFlagOption | NSEventModifierFlagCommand;
     if (![c[@"code"] isKindOfClass:NSNumber.class] ||
-        [c[@"code"] unsignedIntegerValue] > 127) {
-      reply(@{@"error" : @"Invalid guest key code"});
+        [c[@"code"] doubleValue] != [c[@"code"] unsignedIntegerValue] ||
+        [c[@"code"] unsignedIntegerValue] > 127 || !SMKeyHoldValid(hold) ||
+        ![flags isKindOfClass:NSNumber.class] || [flags doubleValue] != [flags unsignedIntegerValue] ||
+        ([flags unsignedIntegerValue] & ~allowed)) {
+      reply(@{@"error" : @"Invalid guest key code, modifiers or hold duration (10–5000 ms)"});
       return;
     }
-    key([c[@"code"] unsignedShortValue], [c[@"flags"] unsignedLongLongValue]);
-    reply(@{@"ok" : @YES});
+    id keyboard = [vm _keyboards].firstObject;
+    if (vm.state != VZVirtualMachineStateRunning || ![keyboard respondsToSelector:@selector(sendKeyEvents:)]) {
+      reply(@{@"error":@"Guest virtual keyboard is unavailable or the VM is not running"});
+      return;
+    }
+    SMPressKey([c[@"code"] unsignedShortValue], [flags unsignedIntegerValue], [hold integerValue],
+        ^(unsigned short code, BOOL down) { keyEvent(keyboard, code, down ? NSEventTypeKeyDown : NSEventTypeKeyUp); },
+        ^(BOOL success) { reply(success ? @{@"ok":@YES} :
+            @{@"error":@"Guest key operation failed; releases were attempted. Inspect the guest before retrying"}); });
     return;
   }
-  if ([op isEqual:@"click"]) {
-    if (![c[@"x"] isKindOfClass:NSNumber.class] ||
-        ![c[@"y"] isKindOfClass:NSNumber.class] ||
-        !isfinite([c[@"x"] doubleValue]) || !isfinite([c[@"y"] doubleValue]) ||
-        [c[@"x"] doubleValue] < 0 || [c[@"x"] doubleValue] >= 1024 ||
-        [c[@"y"] doubleValue] < 0 || [c[@"y"] doubleValue] >= 768) {
-      reply(@{@"error" : @"Guest coordinates outside the display"});
+  if ([@[@"click", @"move", @"drag", @"scroll"] containsObject:op]) {
+    NSArray *steps = SMPointerPlan(c);
+    if (!steps) { reply(@{@"error":@"Invalid guest pointer arguments"}); return; }
+    id pointer = [vm _pointingDevices].firstObject;
+    if (!pointer || ![pointer respondsToSelector:@selector(sendPointerEvents:)] ||
+        ([op isEqual:@"scroll"] && (![pointer respondsToSelector:@selector(sendScrollWheelEvents:)] ||
+        ![NSClassFromString(@"_VZScrollWheelEvent") instancesRespondToSelector:
+          @selector(initWithScrollingDeltaX:scrollingDeltaY:acceleratedScrollingDeltaX:acceleratedScrollingDeltaY:scrollPhase:momentumPhase:)]))) {
+      reply(@{@"error":@"Guest virtual pointer API is unavailable on this host build"});
       return;
     }
-
     displayInUse = YES;
     prepareDisplay();
-    NSPoint p = NSMakePoint(
-        [c[@"x"] doubleValue] * view.bounds.size.width / 1024,
-        (768 - [c[@"y"] doubleValue]) * view.bounds.size.height / 768);
-    NSEvent *ns =
-        [NSEvent mouseEventWithType:NSEventTypeLeftMouseDown
-                           location:p
-                      modifierFlags:0
-                          timestamp:NSProcessInfo.processInfo.systemUptime
-                       windowNumber:window.windowNumber
-                            context:nil
-                        eventNumber:0
-                         clickCount:1
-                           pressure:1];
-    Class cls = NSClassFromString(@"_VZScreenCoordinatePointerEvent");
-    id reference = [[cls alloc] initWithEvent:ns view:view];
-    CGPoint location = [(NSObject *)reference location];
-    id pointer = [vm _pointingDevices].firstObject;
-    // NSView's event adapter reads the physical host mouse-button state. Supply
-    // guest-only button bits explicitly so no host mouse action is necessary.
-    [pointer sendPointerEvents:@[ [[cls alloc] initWithLocation:location
-                                                 pressedButtons:0] ]];
-    dispatch_after(
-        dispatch_time(DISPATCH_TIME_NOW, 75 * NSEC_PER_MSEC),
-        dispatch_get_main_queue(), ^{
-          [pointer sendPointerEvents:@[ [[cls alloc] initWithLocation:location
-                                                       pressedButtons:1] ]];
-          dispatch_after(
-              dispatch_time(DISPATCH_TIME_NOW, 150 * NSEC_PER_MSEC),
-              dispatch_get_main_queue(), ^{
-                [pointer
-                    sendPointerEvents:@[ [[cls alloc] initWithLocation:location
-                                                        pressedButtons:0] ]];
-                reply(@{@"ok" : @YES});
-              });
-        });
+    pointerSteps(steps, 0, NSProcessInfo.processInfo.systemUptime);
     return;
   }
   reply(@{@"error" : @"Unknown operation"});
 }
 void SMDisplayCommand(NSDictionary *command,
                       void (^completion)(NSDictionary *)) {
+  if (SMKeyboardBusy()) {
+    completion(@{@"error":@"A guest key operation is still in progress"});
+    return;
+  }
   BOOL keyRequest = [command[@"op"] isEqual:@"key"];
-  BOOL pointerRequest = [command[@"op"] isEqual:@"click"];
+  BOOL pointerRequest = [@[@"click", @"move", @"drag", @"scroll"] containsObject:command[@"op"]];
   if (!vm || (keyRequest && ![vm respondsToSelector:@selector(_keyboards)]) ||
       (pointerRequest && ![vm respondsToSelector:@selector(_pointingDevices)])) {
     completion(@{

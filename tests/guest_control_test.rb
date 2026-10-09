@@ -38,13 +38,31 @@ class GuestControlTest < Minitest::Test
     assert_equal '403', request.code
   end
   def test_host_and_lifecycle_operations_are_rejected_even_with_correct_token
-    %w[sip reboot shutdown exec shell ports shares network-set network-status enable disable show hide auto camera microphone].each do |op|
+    %w[sip reboot shutdown exec shell ports shares network-set network-status enable disable show hide auto camera microphone clipboard clipboard-read clipboard-write to-guest to-host].each do |op|
       assert_equal '403', request({'op'=>op}).code, op
     end
     assert_equal '400', request({'op'=>'status', 'vm'=>'another-guest'}).code
     assert_equal '400', request({'op'=>'click', 'x'=>'1;command', 'y'=>0}).code
     assert_equal '413', request({'op'=>'type', 'text'=>'x' * 20000}).code
-    assert_equal '400', request({'op'=>'type', 'text'=>"x\ny"}).code
+    assert_equal '400', request({'op'=>'type', 'text'=>"x\x00y"}).code
+  end
+  def test_timed_key_requests_are_validated_before_dispatch
+    desktop, calls = Object.new, []
+    desktop.define_singleton_method(:keyboard) { |key, hold_ms:nil| calls << [key,hold_ms] }
+    @api.instance_variable_set(:@desktop, desktop)
+    assert_equal '200', request({'op'=>'key','key'=>'a'}).code
+    assert_equal '200', request({'op'=>'key','key'=>'cmd+shift+a','hold_ms'=>500}).code
+    assert_equal [['a',nil],['cmd+shift+a',500]], calls
+    [nil, true, '80', 0, 9, 5001, 50.5].each do |bad|
+      assert_equal '400', request({'op'=>'key','key'=>'a','hold_ms'=>bad}).code
+    end
+    assert_equal '400', request({'op'=>'key','key'=>'a','hold_ms'=>80,'phase'=>'down'}).code
+    assert_equal '403', request({'op'=>'key-down','key'=>'a'}).code
+    assert_equal 2, calls.length
+    desktop.define_singleton_method(:keyboard) { |*_, **_| raise AgentVM::Desktop::UnsupportedInput, 'The running viewer needs an update and a later VM restart for timed key holds.' }
+    response = request({'op'=>'key','key'=>'a','hold_ms'=>80})
+    assert_equal '422', response.code
+    assert_includes response.body, 'later VM restart'
   end
   def test_approved_operations_reach_only_the_bound_guest
     desktop = Object.new
@@ -65,6 +83,22 @@ class GuestControlTest < Minitest::Test
     assert_equal 1, calls.length
     assert_equal '400', request({'op'=>'extension','kind'=>'kernel','app'=>'macFUSE'}).code
     assert_equal '200', request(value.merge('op'=>'check')).code
+  end
+  def test_pointer_and_text_api_validates_scope_and_reaches_bound_desktop
+    desktop, calls = Object.new, []
+    desktop.define_singleton_method(:pointer) { |value| calls << value; {'ok'=>true} }
+    desktop.define_singleton_method(:type) { |value| calls << value }
+    @api.instance_variable_set(:@desktop, desktop)
+    %w[move drag scroll].zip([%w[move 10 20], %w[drag 10 20 100 200], %w[scroll down]]).each do |_,args|
+      assert_equal '200', request(GuestControlClient.payload(args)).code
+    end
+    assert_equal '200', request({'op'=>'type','text'=>"hello\tworld\n"}).code
+    assert_equal "hello\tworld\n", calls.last
+    before = calls.length
+    assert_equal '400', request({'op'=>'drag','x'=>0,'y'=>0,'to_x'=>9999,'to_y'=>0,'duration'=>1}).code
+    assert_equal '400', request({'op'=>'scroll','x'=>0,'y'=>0,'dx'=>0,'dy'=>100,'host'=>true}).code
+    assert_equal '400', request({'op'=>'type','text'=>'café'}).code
+    assert_equal before, calls.length
   end
   def test_server_errors_do_not_disclose_host_paths_or_arguments
     desktop = Object.new
@@ -95,7 +129,7 @@ class GuestControlTest < Minitest::Test
     assert_equal 'Invalid Mac control token.', error.message
     end
     assert_equal({'op'=>'type', 'text'=>'hello'}, GuestControlClient.payload(['type'], input:StringIO.new('hello')))
-    assert_raises(GuestControlClient::Error) { GuestControlClient.payload(['type'], input:StringIO.new('x' * 513)) }
+    assert_raises(GuestControlClient::Error) { GuestControlClient.payload(['type'], input:StringIO.new('x' * 4097)) }
     assert_raises(GuestControlClient::Error) { GuestControlClient.payload(['sip', 'off']) }
   end
   def test_generation_must_match_current_vm_process_and_host_mode

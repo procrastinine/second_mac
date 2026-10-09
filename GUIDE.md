@@ -47,6 +47,7 @@ custom Tart, live operations, and changes that take effect at the next start.
 | `vm runtime` / `vm runtime standard\|custom\|auto` | Inspect actual capabilities / choose the runtime for the next cold start |
 | `vm ssh` | Open a shell; start the VM if necessary |
 | `vm gui` | Start with a native desktop window, or show its existing window |
+| `vm clipboard to-guest` / `vm clipboard to-host` | Copy plain text once in the chosen direction; paste in the destination with Command-V |
 | `vm gui --restart` / `vm gui --headless` | Explicitly restart if a window cannot be attached live / hide the window without ending work |
 | `vm gui --hide` | Hide the native window while the VM and SSH keep running |
 | `vm ui enable [--restart]` | Build and enable optional host-side control of the guest's virtual display/input |
@@ -225,6 +226,12 @@ Tmux is available without being forced on every shell. It includes mouse scrolli
 ## Occasional desktop access
 
 `vm gui` retains the same network, sharing, audio, clipboard and USB isolation.
+Click inside the guest to focus its keyboard. Command shortcuts such as
+**⌘,** (the guest app's settings), **⌘C**, **⌘V**, **⌘A** and **⌘Q** operate
+inside that guest. The custom viewer forwards both key presses and releases
+before host menu handling. System-wide shortcuts such as Command-Tab remain
+host-controlled. Updating viewer code takes effect at the next cold VM start;
+`vm restart` applies it now and ends running guest sessions.
 It enables no VNC or Screen Sharing server. With regular Tart, ordinary
 `vm start` keeps the native window hidden and ready; `vm gui` shows it without
 restarting or breaking SSH. This retains a graphical Tart application and may
@@ -339,8 +346,9 @@ Allow/Don't Allow buttons, plus LuLu's recognized connection alerts. This is
 OCR-based convenience, not a universal or
 security-grade permission recognizer. It cannot approve every System Settings,
 administrator, FileVault or kernel-extension prompt. Explicit Settings workflows
-handle supported app grants and their guest administrator prompts. Input assumes a
-US keyboard and printable ASCII. The input implementation uses private
+handle supported app grants and their guest administrator prompts. Typing assumes a
+US keyboard and ASCII, with explicit Tab/Return support; guest-local `mac-control
+paste` supports Unicode. The input implementation uses private
 Virtualization.framework interfaces, tested on macOS 27; future macOS changes
 may require an update. No host-control fallback is used if they fail.
 
@@ -421,15 +429,66 @@ Inside an enabled, running guest:
 ```sh
 mac-control approve          # approve one recognized consent dialog
 mac-control inspect          # text/coordinates from this Mac's display
+mac-control screenshot screen.png
+mac-control capabilities     # controls in the currently running viewer
 mac-control click-text Allow
+mac-control click 320 240 --count 2
+mac-control click 320 240 --button right
+mac-control move 320 240      # hover without clicking
+mac-control drag 180 220 640 480 --duration 0.8
+mac-control scroll down 400 --at 700 500
 mac-control key cmd+shift+p
+mac-control key cmd+comma    # app settings
+mac-control key right --hold-ms 500  # hold, then release; e.g. game input
 printf %s 'text' | mac-control type
-mac-control screenshot > screen.png
+mac-control type 'literal text'
+printf %s 'café 日本語' | mac-control paste
 mac-control grant /Applications/OBS.app screen-recording
 mac-control revoke /Applications/OBS.app accessibility
 mac-control doctor           # managed services, sharing, DNS and privacy checks
 mac-control help
+mac-control help drag
+mac-control skill install    # install to ~/.agents/skills/mac-control/SKILL.md
 ```
+
+Screenshots, OCR centers and input use the same **1024×768 top-left coordinates**,
+independent of Retina scaling or host viewer size. Screenshot file output uses
+private permissions and returns its path/dimensions as JSON; omit the path or
+use `-` for redirected PNG output. Observe the result after input: success means
+the input was delivered, not that the target app completed the workflow. Drag,
+hover, scrolling and extended clicks require an updated viewer on the next VM
+cold start; `capabilities` reports what the running viewer supports.
+
+`type` accepts quoted text or stdin, including tabs and newlines (which send Tab
+and Return), up to 4096 bytes on a US keyboard. `paste` accepts UTF-8, replaces
+only the guest clipboard with plain text, then sends Cmd-V. It leaves that guest
+clipboard set and never accesses the host clipboard. For the account password,
+use `mac-control password --local`, focus the guest field, then `mac-control key
+cmd+v`; some secure fields may refuse paste.
+
+Updated viewers hold each key for **80 ms** before release, including ordinary
+typing and shortcuts. `mac-control key right --hold-ms 500` requests a longer
+hold; accepted durations are 10–5000 ms. The native controller releases the key
+and modifiers even if the caller disconnects, and attempts all releases if an
+input operation fails. Suspending refuses an active key hold so it cannot save
+a synthetic pressed key. Long typing is paced; use guest-local `paste` for large
+text when replacing the guest clipboard is acceptable.
+
+`mac-control capabilities` reports `timed_keys`, the default `key_hold_ms`, and
+the accepted range. An older running viewer reports `key_timing_update_pending`
+and rejects explicit hold durations until its next full VM restart. Its legacy
+down/up taps can be missed by games that poll held state. Verify actual app
+behavior; delivery success alone does not qualify a game or other polling app.
+
+The portable [mac-control skill](guest/skills/mac-control/SKILL.md) explains the
+observe/action/verification workflow and automated permissions. Install it with
+`mac-control skill install` or pass another agent's skills directory, for example
+`mac-control skill install ~/.pi/agent/skills`. Reload skills in the agent after
+installation. Repeated installs are idempotent; replacing a customized skill
+requires `--force`. `mac-control skill path` locates the bundled source. Skill
+installation is local and does not enable UI control or change agent permissions.
+For easy consent handling, preserve or enable host `vm permissions auto on`;
+explicit guest `grant` and `approve` commands remain available with SIP on.
 
 Without selecting UI support, this mode is off. The host command is **`vm`**; the guest command is
 **`mac-control`**. The installer provides the guest helper, and managed starts
@@ -452,8 +511,7 @@ source VM's next run. Use `vm throwaway guest-control ID on --once` to opt in fo
 one run of a particular copy, or `vm throwaway guest-control ID autostart on`
 to enable its later starts independently. Automatic permission approval is also
 cleared when creating a throwaway. Disabling the mode preserves existing grants; an action
-already issued may finish. `type` accepts up to 512 bytes of printable US-keyboard
-text per call. Second Mac updates refresh an enabled main-VM service and its
+already issued may finish. Second Mac updates refresh an enabled main-VM service and its
 client; a stopped main VM receives the latest client on its next managed start.
 Retained throwaways use their own saved runtime and client.
 
@@ -528,6 +586,27 @@ receiver after an update. Developer and agent packages remain independently
 managed inside the guest.
 
 ## Guest password and clipboard
+
+In the host's SwiftBar **Clipboard** submenu, choose **Host text → guest** or
+**Guest text → host** for a one-time plain-text copy. Then focus the destination
+app and press **⌘V**, or use that app's **Edit → Paste** menu. The host commands
+are `vm clipboard to-guest` and `vm clipboard to-host`.
+
+For a password prompt inside the guest, choose **Clipboard → Guest password →
+guest**, then paste into its password field. The matching command is
+`vm password --guest`. This writes the stored password directly to the guest;
+it does not read or replace your host clipboard. **Guest password → host**
+copies it to the host instead. Password copying does not submit the prompt.
+
+Clipboard transfers require a running guest with the configured desktop account
+logged in. They do not start or resume a VM. The destination clipboard is
+replaced only by an explicit transfer; subsequent copies do not synchronize.
+Transfers support UTF-8 plain text up to 1 MiB, preserving line breaks. Images,
+rich formatting and files are not transferred; use `vm cp` for files. No text
+on the source clipboard, a failed read or an invalid response leaves the
+destination intact. Contents are not printed, logged or saved to temporary
+files. Once sent, text is available to applications in the destination account,
+including guest agents. The guest-control API cannot request either transfer.
 
 `vm password` copies the guest administrator password to your Mac's clipboard;
 `--copy` is an alias and `--show` displays it only in an interactive terminal.

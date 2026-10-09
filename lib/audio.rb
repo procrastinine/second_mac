@@ -12,6 +12,14 @@ module AgentVM
       nil
     end
 
+    def muted?
+      return nil unless @vm.running?
+      value = @vm.rpc('/usr/bin/osascript', '-e', 'output muted of (get volume settings)', capture:true, timeout:2).strip
+      {'true'=>true, 'false'=>false}[value]
+    rescue Error
+      nil
+    end
+
     def command(argv)
       args = argv.dup
       mode = args.shift || 'status'

@@ -10,6 +10,7 @@ require_relative 'suspend'
 require_relative 'power'
 require_relative 'credentials'
 require_relative 'guest-control'
+require_relative 'clipboard'
 require 'uri'
 require 'base64'
 
@@ -149,7 +150,7 @@ module AgentVM
           lines << "--#{text(entry['name'])} (#{kind}) | href=#{file_url(entry['host'])}"
         end
       end
-      lines << action('Copy guest password', 'menu-action', 'password') unless busy
+      lines.concat(clipboard_lines(@vm, ['menu-action'], busy:busy))
       lines << '---'
       unless busy
         lines << 'Tmux sessions'
@@ -192,12 +193,7 @@ module AgentVM
         lines << '-----'
         lines << action('Check guest macOS updates…', 'update', '--macos', '--check', terminal:true, prefix:'--')
         lines << action('Update guest macOS… (may restart)', 'update', '--macos', terminal:true, prefix:'--')
-        audio = Audio.new(@vm)
-        if running && audio.attached
-          lines << 'Sound'
-          lines << action('Mute guest playback', 'menu-action', 'audio', 'mute', prefix:'--')
-          lines << action('Unmute guest playback', 'menu-action', 'audio', 'unmute', prefix:'--')
-        end
+        lines.concat(sound_lines(@vm, ['menu-action'])) if running
       end
       if running && !busy
         lines << action('Suspend (save memory)', 'menu-action', 'suspend') if Suspend.new(@vm).supported?
@@ -251,7 +247,7 @@ module AgentVM
           else
             lines << action(running ? 'Mount disk in Finder' : (suspended ? 'Resume & Mount disk in Finder' : 'Start & Mount disk in Finder'), *args, 'mount', prefix:'----')
           end
-          lines << action('Copy guest password', *args, 'password', prefix:'----')
+          lines.concat(clipboard_lines(copy, args, busy:busy, prefix:'----'))
           lines << action('Status & resources…', 'throwaway', 'status', id, terminal:true, prefix:'----')
           lines << '----Network'
           lines.concat(network_lines(copy, args, busy:busy, prefix:'------'))
@@ -315,6 +311,28 @@ module AgentVM
         lock.close
         refresh
       end
+    end
+    def clipboard_lines(vm, args, busy:, prefix:'')
+      return [] if busy
+      if vm.config['throwaway'] && !File.file?(vm.file('runtime/lib/clipboard.rb'))
+        return [action('Copy guest password', *args, 'password', prefix:prefix)]
+      end
+      lines = [prefix + 'Clipboard']
+      if vm.running?
+        lines << action('Host text → guest', *args, 'clipboard', 'to-guest', prefix:prefix + '--')
+        lines << action('Guest text → host', *args, 'clipboard', 'to-host', prefix:prefix + '--')
+        lines << prefix + '-----'
+        lines << action('Guest password → guest', *args, 'password', '--guest', prefix:prefix + '--')
+      end
+      lines << action('Guest password → host', *args, 'password', prefix:prefix + '--')
+      lines
+    end
+    def sound_lines(vm, args)
+      audio = Audio.new(vm)
+      return [] unless audio.attached
+      muted = audio.muted?
+      return [info('Guest playback state unavailable')] if muted.nil?
+      [action(muted ? 'Unmute guest playback' : 'Mute guest playback', *args, 'audio', muted ? 'unmute' : 'mute')]
     end
     def network_lines(vm, args, busy:, prefix:)
       if vm.config['throwaway'] && !File.file?(vm.file('runtime/lib/network.rb'))
@@ -400,7 +418,15 @@ module AgentVM
       when 'gui-restart' then GUI.new(vm).command(['--restart'])
       when 'hide-gui' then GUI.new(vm).command(['--hide'])
       when 'headless' then GUI.new(vm).command(['--headless'])
-      when 'password' then AgentVM.password_command(vm.password, [])
+      when 'password'
+        if args == ['--guest']
+          Clipboard.new(vm).copy_password
+        elsif args.empty?
+          AgentVM.password_command(vm.password, [])
+        else
+          raise Error, 'Expected no password arguments or --guest.'
+        end
+      when 'clipboard' then Clipboard.new(vm).command(args)
       when 'network' then Network.new(vm).command(args)
       when 'runtime' then Runtime.new(vm).command(args)
       when 'audio' then Audio.new(vm).command(args)

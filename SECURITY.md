@@ -27,6 +27,19 @@ Clipboard, audio, USB passthrough,
 SSH agent forwarding and X11 forwarding are disabled by default. Optional host
 media sharing is described below; clipboard copies remain explicit commands.
 
+`vm clipboard to-guest` and `to-host`, and the host's SwiftBar **Clipboard**
+submenu, copy a single plain-text snapshot in the requested direction over the
+existing SSH transport. `--no-clipboard` stays enabled. There is no clipboard
+watcher, inbound clipboard service or guest-control clipboard operation. Menu
+refreshes do not read either clipboard. `vm password --guest` sends only the
+stored guest password, without reading or replacing the host clipboard.
+Transfers are limited to 1 MiB of UTF-8 text, with bounded subprocess output
+and timeouts. Contents travel through private pipes, never command arguments,
+logs or temporary files. The source is validated before the destination is
+changed. Destination applications can read text after a transfer; copying does
+not automatically paste, execute text or press Return. Existing clipboard
+history tools and terminal OSC 52 settings remain independent of these controls.
+
 The default creates native writable and read-only host folders, plus a scoped
 linked folder when host macFUSE is ready. Otherwise the linked folder is omitted
 without installing a driver; the saved choice changes only explicitly. Native shares pass
@@ -83,6 +96,14 @@ rules, selecting another VM, SIP changes, or VM lifecycle control. All UI input
 targets the same guest virtual devices, including keyboard input into guest
 apps. Any software able to read the guest account's private token can use this
 capability; it is not per-app authorization.
+
+Pointer targets are bounded to the guest screenshot; drag duration and scroll
+distance are bounded, and each gesture releases its buttons on completion.
+`mac-control paste` is an explicit guest-local clipboard write followed by a
+virtual Cmd-V. It leaves the guest clipboard set, never reads the host clipboard,
+and introduces no clipboard endpoint. Input text is supplied on stdin to the
+clipboard helper, never as subprocess arguments. Screenshot files written by
+the helper use mode 0600. Installing its skill only copies instructions.
 
 The service checks the owning VM process and host authorization, stops with
 its private forward when the VM exits, and rotates credentials each managed

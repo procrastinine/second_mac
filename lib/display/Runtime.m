@@ -1,4 +1,5 @@
 #import "SecondMacDisplay.h"
+#import "Keyboard.h"
 #import <unistd.h>
 #import <sys/stat.h>
 
@@ -37,9 +38,14 @@ int SMStartRuntimeControl(VZVirtualMachine *machine, VZVirtualMachineConfigurati
           [[NSFileManager defaultManager] fileExistsAtPath:temporary.path]) {
         reply(@{@"error": @"A saved state already exists; resume it before saving again."}); return;
       }
+      // Never preserve a synthetic held key in a memory checkpoint. Also block
+      // new presses during the asynchronous pause/save transition.
+      if (!SMBeginKeyboardPause()) {
+        reply(@{@"error": @"A guest key is still held; retry saving after the input command finishes."}); return;
+      }
       saving = YES;
       [machine pauseWithCompletionHandler:^(NSError *pauseError) {
-        if (pauseError) { saving = NO; reply(@{@"error": pauseError.localizedDescription}); return; }
+        if (pauseError) { saving = NO; SMEndKeyboardPause(); reply(@{@"error": pauseError.localizedDescription}); return; }
         [machine saveMachineStateToURL:temporary completionHandler:^(NSError *saveError) {
           NSError *failure = saveError;
           if (!failure) {
@@ -51,6 +57,7 @@ int SMStartRuntimeControl(VZVirtualMachine *machine, VZVirtualMachineConfigurati
           // A full disk or unsupported device must not kill the running guest.
           [machine resumeWithCompletionHandler:^(NSError *resumeError) {
             saving = NO;
+            if (!resumeError) SMEndKeyboardPause();
             reply(@{@"error": [NSString stringWithFormat:@"Save failed: %@%@", failure.localizedDescription,
               resumeError ? [@"; resume failed: " stringByAppendingString:resumeError.localizedDescription] : @""]});
           }];

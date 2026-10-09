@@ -1,5 +1,6 @@
 require_relative 'core'
 require_relative 'ui'
+require_relative '../guest/install-control'
 
 module AgentVM
   class Permissions
@@ -14,9 +15,7 @@ module AgentVM
         power = @vm.ssh('/usr/bin/pmset', '-g', capture:true)
         @vm.root('/usr/bin/pmset', '-a', 'displaysleep', '0') unless power.match?(/^\s*displaysleep\s+0(?:\s|$)/)
       end
-      sources = {'control-client.rb'=>File.read(File.join(__dir__, '..', 'guest/control-client.rb'), encoding:'UTF-8'),
-                 'core.rb'=>File.read(File.join(__dir__, 'core.rb'), encoding:'UTF-8'),
-                 'profile-plan.rb'=>File.read(File.join(__dir__, 'profile-plan.rb'), encoding:'UTF-8')}
+      sources = GuestControlInstall::SOURCES.to_h { |name,path| [name, File.read(File.join(__dir__, '..', path), encoding:'UTF-8')] }
       installer = File.read(File.join(__dir__, '..', 'guest/install-control.rb'), encoding:'UTF-8')
       @vm.root('/usr/bin/ruby', '-e', installer, input:JSON.generate('user'=>@vm.config.fetch('user'), 'sources'=>sources))
     end

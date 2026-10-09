@@ -10,9 +10,9 @@ class GuestUpdateTest < Minitest::Test
   def setup
     @tmp = Dir.mktmpdir('second-mac-reconcile-')
     @source = File.join(@tmp, 'source')
-    %w[guest/control-client.rb guest/install-control.rb guest/camera-sink.m guest/camera-receiver.rb
+    (GuestControlInstall::SOURCES.values + %w[guest/install-control.rb guest/camera-sink.m guest/camera-receiver.rb
        guest/configure.py lib/core.rb lib/profile-plan.rb lib/permissions.rb lib/autologin.rb
-       lib/guest-update.rb lib/camera.rb].each { |name| AgentVM.write(File.join(@source, name), name) }
+       lib/guest-update.rb lib/camera.rb]).uniq.each { |name| AgentVM.write(File.join(@source, name), name) }
     AgentVM.write(File.join(@tmp, 'disk.img'), 'fixture disk')
     @payload = {'applied'=>{}, 'helpers'=>{}, 'camera_installed'=>false}
     @calls = []
@@ -42,8 +42,7 @@ class GuestUpdateTest < Minitest::Test
   end
   def teardown; FileUtils.remove_entry(@tmp); end
   def self.helpers(source)
-    {'control-client.rb'=>'guest/control-client.rb', 'command'=>'guest/control-client.rb',
-     'core.rb'=>'lib/core.rb', 'profile-plan.rb'=>'lib/profile-plan.rb'}.to_h do |name, path|
+    GuestControlInstall::SOURCES.merge('command'=>'guest/control-client.rb').to_h do |name, path|
       [name, Digest::SHA256.file(File.join(source, path)).hexdigest]
     end
   end
@@ -99,6 +98,19 @@ class GuestUpdateTest < Minitest::Test
     sync
     @calls.clear
     @payload['helpers']['command'] = nil
+    sync
+    assert_includes @calls, :helpers
+    assert_empty configuration_calls
+  end
+  def test_bundled_skill_update_and_missing_support_file_are_reconciled
+    sync
+    @calls.clear
+    File.write(File.join(@source, 'guest/skills/mac-control/SKILL.md'), 'updated skill')
+    assert @update.pending?
+    sync
+    assert @update.helpers_current?(@payload['helpers'])
+    @calls.clear
+    @payload['helpers'].delete('control-commands.rb')
     sync
     assert_includes @calls, :helpers
     assert_empty configuration_calls

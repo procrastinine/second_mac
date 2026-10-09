@@ -56,7 +56,8 @@ class PermissionClientTest < Minitest::Test
     helper.install_client
     assert_equal 0, display
     files = Dir.glob(File.join(directory, '**', '*'), File::FNM_DOTMATCH).select { |path| File.file?(path) }
-    assert_equal 4, files.length
+    assert_equal GuestControlInstall::SOURCES.length + 1, files.length
+    assert File.file?(File.join(root, 'skills/mac-control/SKILL.md'))
     executable = File.join(account.dir, '.local/bin/mac-control')
     assert_equal File.read(File.expand_path('../guest/control-client.rb', __dir__)), File.read(executable)
     assert_equal File.read(executable), File.read(File.join(root, 'control-client.rb'))

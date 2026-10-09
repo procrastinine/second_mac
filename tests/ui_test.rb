@@ -73,10 +73,11 @@ class UITest < Minitest::Test
 
   def test_recovery_rejects_non_keyboard_text_before_sending_any_keys
     sent = []
-    @ui.define_singleton_method(:key) { |*args, **options| sent << [args, options] }
-    assert_raises(AgentVM::Error) { @ui.type("safe\nunsafe") }
+    recovery = AgentVM::Recovery.new(@vm)
+    recovery.define_singleton_method(:key) { |*args, **options| sent << [args, options] }
+    assert_raises(AgentVM::Error) { recovery.type("safe\nunsafe") }
     assert_empty sent
-    @ui.type('Yz!')
+    recovery.type('Yz!')
     assert_equal [16,6,18], sent.map { |args, _| args.first }
     assert_equal [1<<17,0,1<<17], sent.map { |_, options| options[:flags] }
   end

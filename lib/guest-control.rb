@@ -14,10 +14,10 @@ module AgentVM
       attr_reader :status
       def initialize(status, message); @status = status; super(message); end
     end
-    FIELDS = {'status'=>[], 'approve'=>[], 'inspect'=>[], 'screenshot'=>[],
+    FIELDS = {'status'=>[], 'capabilities'=>[], 'approve'=>[], 'inspect'=>[], 'screenshot'=>[],
               'click'=>%w[x y], 'click-text'=>['text'], 'key'=>['key'], 'type'=>['text'],
               'grant'=>%w[app permissions], 'revoke'=>%w[app permissions], 'check'=>%w[app permissions],
-              'extension'=>%w[kind app]}.freeze
+              'extension'=>%w[kind app]}.merge(MacControlCommands::FIELDS).freeze
     LIMIT = 16 * 1024
     def initialize(vm, token, active)
       @vm, @token, @active = vm, token, active
@@ -33,23 +33,38 @@ module AgentVM
       reject(400, 'Expected a JSON object.') unless value.is_a?(Hash)
       op = value['op']
       reject(403, 'Operation is outside Mac control scope.') unless FIELDS.key?(op)
-      reject(400, 'Unexpected or missing arguments.') unless value.keys.sort == (FIELDS[op] + ['op']).sort
+      pointer = MacControlCommands::POINTER.include?(op)
+      if pointer || op == 'key'
+        begin
+          pointer ? MacControlCommands.validate_pointer(value) : MacControlCommands.validate_key(value)
+        rescue MacControlCommands::Error => e
+          reject(400, e.message)
+        end
+      else
+        reject(400, 'Unexpected or missing arguments.') unless value.keys.sort == (FIELDS[op] + ['op']).sort
+      end
       case op
       when 'status' then {'enabled'=>true, 'scope'=>'this Mac\'s UI and app permissions'}
+      when 'capabilities' then @desktop.capabilities
       when 'approve' then {'approved'=>@desktop.approve_once}
       when 'inspect' then @desktop.screen
       when 'screenshot' then @desktop.request({'op'=>'screenshot'})
-      when 'click'
-        reject(400, 'Coordinates must be finite, nonnegative numbers.') unless %w[x y].all? { |k| value[k].is_a?(Numeric) && value[k].finite? && value[k] >= 0 }
-        @desktop.request(value)
-      when 'click-text', 'key', 'type'
-        text = value[op == 'key' ? 'key' : 'text']
-        reject(400, 'Expected nonempty text of at most 512 bytes.') unless text.is_a?(String) && (1..512).cover?(text.bytesize) && !text.match?(/[\x00-\x1f]/)
-        case op
-        when 'click-text' then @desktop.click_text(text)
-        when 'key' then @desktop.keyboard(text)
-        when 'type' then @desktop.type(text)
+      when *MacControlCommands::POINTER then @desktop.pointer(value)
+      when 'type'
+        begin
+          MacControlCommands.validate_text(value['text'])
+        rescue MacControlCommands::Error => e
+          reject(400, e.message)
         end
+        @desktop.type(value['text'])
+        {'ok'=>true}
+      when 'key'
+        @desktop.keyboard(value['key'], hold_ms:value['hold_ms'])
+        {'ok'=>true}
+      when 'click-text'
+        text = value['text']
+        reject(400, 'Expected nonempty text of at most 512 bytes.') unless text.is_a?(String) && (1..512).cover?(text.bytesize) && !text.match?(/[\x00-\x1f]/)
+        @desktop.click_text(text)
         {'ok'=>true}
       when 'extension'
         kind, app = value.values_at('kind', 'app')
@@ -90,6 +105,8 @@ module AgentVM
       res.body = JSON.generate(dispatch(value))
     rescue Rejected => e
       res.status, res.body = e.status, JSON.generate('error'=>e.message)
+    rescue Desktop::UnsupportedInput => e
+      res.status, res.body = 422, JSON.generate('error'=>e.message)
     rescue JSON::ParserError
       res.status, res.body = 400, JSON.generate('error'=>'Invalid JSON.')
     rescue Timeout::Error

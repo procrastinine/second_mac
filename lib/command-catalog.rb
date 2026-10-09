@@ -8,9 +8,9 @@ module AgentVM
     Node = Struct.new(:path, :syntax, :summary, :details, :examples, :options,
                       :values, :arguments, :repeat, :passthrough, :leading, keyword_init:true)
     COMMANDS = {}
-    THROWAWAY_ACTIONS = %w[ssh sudo cp tmux gui mount unmount start stop restart reboot suspend resume status resources password ports network sip permissions ui guest-control microphone audio camera auth].freeze
+    THROWAWAY_ACTIONS = %w[ssh sudo cp tmux gui clipboard mount unmount start stop restart reboot suspend resume status resources password ports network sip permissions ui guest-control microphone audio camera auth].freeze
     GROUPS = {
-      'Daily use'=>%w[status access start stop ssh tmux sudo cp gui mount unmount password],
+      'Daily use'=>%w[status access start stop ssh tmux sudo cp gui clipboard mount unmount password],
       'Power and resources'=>%w[suspend resume reboot restart force-stop runtime resources],
       'Access and controls'=>%w[shares projects network ports ui permissions guest-control auth audio microphone camera sip],
       'Maintenance'=>%w[update apply doctor logs profiles agents pi codex claude menubar images cache check-sleep],
@@ -43,6 +43,11 @@ module AgentVM
     add 'gui', '[--hide | --headless | --restart]', 'Show or hide the guest desktop.', options:RESTART.merge('--hide'=>'Hide the existing desktop window.', '--headless'=>'Start without a desktop window.'),
       details:'Show/hide keeps an existing compatible VM process. Changing a strictly headless run requires an explicit restart.'
     add 'mount', '', 'Mount guest files in host Finder; start the VM if needed.'
+    add 'clipboard', 'to-guest | to-host', 'Copy plain text once between host and guest clipboards.',
+      details:'Run on the host, with the guest running and its configured desktop account logged in. Automatic sharing stays disabled. Text only, up to 1 MiB; no automatic paste. Clipboard content is never printed or logged.',
+      examples:['vm clipboard to-guest', 'vm clipboard to-host']
+    add 'clipboard to-guest', '', 'Copy the current host text into the guest clipboard once.'
+    add 'clipboard to-host', '', 'Copy the current guest text into the host clipboard once.'
     add 'unmount', '', 'Unmount the guest Finder volume.'
     add 'password', '[--guest | --show]', 'Copy the guest password to the host clipboard.',
       options:{'--guest'=>'Copy inside the guest instead; starts it if needed.', '--show'=>'Print the password in this terminal.'}
@@ -86,12 +91,19 @@ module AgentVM
     %w[host guest].each { |direction| add "ports remove #{direction}", 'SOURCE_PORT', "Remove a #{direction} forward.", arguments:[direction == 'host' ? :host_port : :guest_port] }
     add 'ui', 'COMMAND', 'Control only the guest desktop through its optional UI controller.'
     %w[enable disable].each { |mode| add "ui #{mode}", '[--restart]', "#{mode.capitalize} the guest UI controller.", options:RESTART }
-    {'status'=>'Show guest UI controller status.', 'inspect'=>'Read guest desktop text and controls.', 'screenshot'=>'Write a guest screenshot to stdout; redirect to a PNG file.', 'show'=>'Show the guest desktop.', 'hide'=>'Hide the guest desktop.', 'approve'=>'Approve one recognized guest permission dialog.', 'type'=>'Type printable ASCII from stdin using the guest US keyboard.'}.each do |mode, summary|
+    {'status'=>'Show guest UI controller status.', 'capabilities'=>'Show controls supported by the running viewer.', 'inspect'=>'Read guest desktop text and controls.', 'show'=>'Show the guest desktop.', 'hide'=>'Hide the guest desktop.', 'approve'=>'Approve one recognized guest permission dialog.'}.each do |mode, summary|
       add "ui #{mode}", '', summary
     end
+    add 'ui screenshot', '[FILE.png|-]', 'Save a guest PNG, or write PNG to redirected stdout.', arguments:[:file]
+    add 'ui type', '[TEXT]', 'Type US-layout ASCII text, tabs and newlines from an argument or stdin (4096 bytes).', arguments:[:none]
     add 'ui click-text', 'LABEL', 'Click a guest control by its visible text.', arguments:[:none]
-    add 'ui click', 'X Y', 'Click guest desktop coordinates.', arguments:[:none, :none]
-    add 'ui key', 'SHORTCUT', 'Send a keyboard shortcut to the guest.', arguments:[:none], examples:['vm ui key cmd+l']
+    add 'ui click', 'X Y [--button left|right|middle] [--count 1|2|3]', 'Click guest screenshot coordinates.', arguments:[:none, :none], options:{'--button BUTTON'=>'Choose left, right or middle.', '--count N'=>'Click once, twice or three times.'}, values:{'--button'=>%w[left right middle], '--count'=>%w[1 2 3]}
+    add 'ui move', 'X Y', 'Move the guest pointer without clicking.', arguments:[:none, :none]
+    add 'ui drag', 'X Y TO_X TO_Y [--duration SECONDS]', 'Drag between guest screenshot coordinates.', arguments:[:none, :none, :none, :none], options:{'--duration SECONDS'=>'Drag duration in seconds (0.1–5; default 0.6).'}, values:{'--duration'=>:none}
+    add 'ui scroll', 'up|down|left|right [PIXELS] [--at X Y]', 'Scroll a guest pane (default 320 pixels at the display center).', arguments:[%w[up down left right], :none], options:{'--at X Y'=>'Pointer coordinates of the pane to scroll.'}, values:{'--at'=>:none}
+    add 'ui key', 'SHORTCUT [--hold-ms MILLISECONDS]', 'Press a guest key or shortcut; default hold is 80 ms on an updated viewer.', arguments:[:none],
+      options:{'--hold-ms MILLISECONDS'=>'Hold for 10–5000 ms, then release all keys.'}, values:{'--hold-ms'=>:none},
+      examples:['vm ui key cmd+l', 'vm ui key right --hold-ms 500']
     add 'permissions', '[status|check|grant|revoke|extension|auto]', 'Inspect or manage guest app permissions.',
       details:'SIP-on grants use guest Settings where supported; camera/microphone need an initial app request. Direct database grants require explicitly disabling guest SIP. This never grants host permissions.'
     add 'permissions status', '', 'Show guest app permission and automatic-approval status.'
